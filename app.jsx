@@ -255,7 +255,7 @@ function HabitGrid({ checks, toggleCheck, collapsed, toggleCollapse, daysInMonth
                               width: 32, height: 28, display: 'flex', alignItems: 'center', justifyContent: 'center',
                               cursor: 'pointer', borderRadius: 4,
                               background: checked ? `${cat.color}25` : '#252B45',
-                              border: `1px solid ${checked ? cat.color : '#374151'}`,
+                              boxShadow: `inset 0 0 0 1px ${checked ? cat.color : '#374151'}`,
                               transition: 'all 150ms',
                             }}
                           >

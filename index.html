@@ -4,6 +4,10 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Daily Disciplines v2 — Habit Tracker</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%233B82F6%22/><path d=%22M25 50 L45 70 L75 30%22 fill=%22none%22 stroke=%22white%22 stroke-width=%2212%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -17,8 +21,9 @@
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background-color: #0F1629;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+      background: radial-gradient(circle at top right, #1A2245, #0F1629);
+      background-attachment: fixed;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
       color: #E2E8F0;
       min-height: 100vh;
     }
@@ -46,8 +51,12 @@
     .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
     .freeze-col { position: -webkit-sticky !important; position: sticky !important; left: 0 !important; z-index: 10 !important; background: #1A1F35 !important; box-shadow: -24px 0 0 0 #1A1F35, 4px 0 6px -2px rgba(0,0,0,0.3) !important; align-self: stretch; }
     .habit-row { display: flex; align-items: center; min-height: 32px; transition: background 150ms; }
-    .category-row { display: flex; align-items: center; min-height: 36px; cursor: pointer; margin-bottom: 2px; user-select: none; }
+    .habit-row:hover { background: rgba(37, 43, 69, 0.4); transform: translateX(2px); border-radius: 4px; }
+    .category-row { display: flex; align-items: center; min-height: 36px; cursor: pointer; margin-bottom: 2px; user-select: none; transition: opacity 150ms; }
+    .category-row:hover { opacity: 0.85; }
     .summary-row { display: flex; align-items: center; min-height: 28px; }
+    .dashboard-card { background: rgba(26, 31, 53, 0.65); backdrop-filter: blur(12px); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05); transition: transform 200ms; }
+    .dashboard-card:hover { transform: translateY(-2px); border-color: rgba(59, 130, 246, 0.3); }
     @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .animate-in { animation: slideIn 300ms ease forwards; }
   </style>
@@ -369,7 +378,7 @@ function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, us
 
   return (
     <div style={{ position: 'sticky', top: 0, zIndex: 40, background: '#0F1629', paddingTop: isMobile ? 8 : 24, paddingBottom: 0, marginBottom: isMobile ? 12 : 24 }}>
-      <div style={{ background: '#1A1F35', borderRadius: 16, padding: isMobile ? '12px 16px' : '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? 10 : 16, boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
+      <div style={{ background: 'rgba(26, 31, 53, 0.65)', backdropFilter: 'blur(16px)', border: '1px solid rgba(255, 255, 255, 0.05)', borderRadius: 16, padding: isMobile ? '12px 16px' : '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: isMobile ? 10 : 16, boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
         <div>
           <h1 style={{ fontSize: isMobile ? 20 : 28, fontWeight: 700, color: '#E2E8F0', marginBottom: isMobile ? 0 : 4 }}>Daily Disciplines</h1>
           {!isMobile && <p style={{ color: '#94A3B8', fontSize: 14 }}>Track your habits. Build your future.</p>}
@@ -435,7 +444,7 @@ function DashboardCards({ totalDone, totalPossible, bestStreak, todayScore, toda
   return (
     <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16, marginBottom: isMobile ? 12 : 24 }}>
       {cards.map(card => (
-        <div key={card.title} className="animate-in" style={{ background: '#1A1F35', borderRadius: 12, padding: isMobile ? '12px 16px' : '20px 24px', borderLeft: `4px solid ${card.color}` }}>
+        <div key={card.title} className="animate-in dashboard-card" style={{ padding: isMobile ? '12px 16px' : '20px 24px', borderLeft: `4px solid ${card.color}` }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: isMobile ? 'center' : 'start', marginBottom: isMobile ? 0 : 8 }}>
             <span style={{ color: '#94A3B8', fontSize: isMobile ? 11 : 13, fontWeight: 500 }}>{card.title}</span>
             {isMobile ? (
@@ -459,7 +468,7 @@ function DashboardCards({ totalDone, totalPossible, bestStreak, todayScore, toda
 function DailyChart({ dailyData }) {
   const isMobile = useIsMobile();
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, padding: isMobile ? 12 : 24, marginBottom: isMobile ? 12 : 24 }}>
+    <div className="dashboard-card" style={{ padding: isMobile ? 12 : 24, marginBottom: isMobile ? 12 : 24 }}>
       <h2 style={{ fontSize: isMobile ? 15 : 18, fontWeight: 600, color: '#E2E8F0', marginBottom: isMobile ? 8 : 16 }}>Daily Completion Rate</h2>
       <ResponsiveContainer width="100%" height={isMobile ? 160 : 250}>
         <AreaChart data={dailyData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -529,7 +538,7 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
   const DAYS_W = daysInMonth * (CELL_W + CELL_GAP) - CELL_GAP + mondayCount * MONDAY_SEP;
 
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, marginBottom: isMobile ? 12 : 24 }}>
+    <div className="dashboard-card" style={{ marginBottom: isMobile ? 12 : 24, paddingBottom: isMobile ? 0 : 4 }}>
       <h2 style={{ fontSize: isMobile ? 15 : 18, fontWeight: 600, color: '#E2E8F0', marginBottom: isMobile ? 8 : 16, padding: isMobile ? '12px 8px 0' : '24px 16px 0' }}>Habit Grid</h2>
       <div style={{ overflowX: 'auto', padding: isMobile ? '0 0 12px 0' : '0 16px 24px 16px', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ display: 'inline-flex', flexDirection: 'column', minWidth: '100%' }}>
@@ -637,10 +646,7 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                 const sumVal = isNumber ? (stats.entries > 0 ? stats.avg : '\u2014') : stats.done;
                 const goalVal = isNumber ? (habit.goal || '\u2014') : (stats.goal || daysInMonth);
                 return (
-                  <div key={habit.id} className="habit-row"
-                    onMouseEnter={e => e.currentTarget.style.background = '#252B4540'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                  >
+                  <div key={habit.id} className="habit-row">
                     <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
                       <span style={{ color: '#E2E8F0', fontSize: isMobile ? 11 : 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{habit.name}</span>
                       {isNumber && (
@@ -696,7 +702,7 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                             width: CELL_W, minWidth: CELL_W, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
                             cursor: isFuture ? 'not-allowed' : 'pointer', borderRadius: 3,
                             background: isFuture ? '#1A1F35' : (checked ? `${cat.color}25` : (todayBg || weekTint)),
-                            border: `1px solid ${checked ? cat.color : '#374151'}`,
+                            boxShadow: `inset 0 0 0 1px ${checked ? cat.color : '#374151'}`,
                             transition: 'all 150ms',
                             opacity: isFuture ? 0.3 : 1,
                             marginLeft: isMonday ? MONDAY_SEP : 0, borderLeft: isMonday ? '2px solid #374151' : undefined,
@@ -946,7 +952,7 @@ function GoalsPanel({ month, year }) {
   };
 
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+    <div className="dashboard-card" style={{ padding: 24, marginBottom: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Goals</h2>
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
         {renderSection('Monthly Goals', 'monthly', '#3B82F6')}
@@ -984,7 +990,7 @@ function MetricsDashboard({ config, metrics, daysInMonth }) {
   });
 
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+    <div className="dashboard-card" style={{ padding: 24, marginBottom: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Metrics Dashboard</h2>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
         {metricStats.map(m => (
@@ -1036,7 +1042,7 @@ function MetricsDashboard({ config, metrics, daysInMonth }) {
 // ─── Weekly Summary ───────────────────────────────────────────
 function WeeklySummary({ weeklyData }) {
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+    <div className="dashboard-card" style={{ padding: 24, marginBottom: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Weekly Summary</h2>
       <ResponsiveContainer width="100%" height={200}>
         <BarChart data={weeklyData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
@@ -1065,7 +1071,7 @@ function Leaderboard({ config, habitStats }) {
   if (sorted.length === 0) return null;
 
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+    <div className="dashboard-card" style={{ padding: 24, marginBottom: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Leaderboard</h2>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {sorted.map((h, idx) => (
@@ -1109,7 +1115,7 @@ function Journal({ journal, setJournal }) {
   };
 
   return (
-    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+    <div className="dashboard-card" style={{ padding: 24, marginBottom: 24 }}>
       <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Journal</h2>
       <textarea
         value={draft}
