@@ -43,7 +43,7 @@
     .num-cell { width: 32px; height: 28px; background: #252B45; color: #E2E8F0; border: 1px solid #374151; border-radius: 4px; text-align: center; font-size: 11px; outline: none; padding: 0; }
     .num-cell:focus { border-color: #3B82F6; }
     .num-cell.has-value { background: rgba(59,130,246,0.15); border-color: #3B82F6; }
-    .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
+    .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
     @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .animate-in { animation: slideIn 300ms ease forwards; }
   </style>
@@ -211,13 +211,16 @@ async function saveConfigCloud(config, uid) {
   } catch (err) { console.error('Cloud config save error:', err); }
 }
 
-async function saveMonthCloud(year, month, checks, metrics, notes, uid) {
+async function saveMonthCloud(year, month, checks, metrics, notes, uid, journal) {
   saveChecks(year, month, checks);
   saveMetrics(year, month, metrics);
   saveNotes(year, month, notes);
+  if (journal !== undefined) saveJournal(year, month, journal);
   if (!uid) return;
   try {
-    await firestoreMonthRef(uid, year, month).set({ checks, metrics, notes }, { merge: true });
+    const data = { checks, metrics, notes };
+    if (journal !== undefined) data.journal = journal;
+    await firestoreMonthRef(uid, year, month).set(data, { merge: true });
   } catch (err) { console.error('Cloud month save error:', err); }
 }
 
@@ -250,18 +253,21 @@ async function migrateLocalToCloud(uid) {
     const checksMatch = key.match(/^dd-checks-(\d{4})-(\d{2})$/);
     const metricsMatch = key.match(/^dd-metrics-(\d{4})-(\d{2})$/);
     const notesMatch = key.match(/^dd-notes-(\d{4})-(\d{2})$/);
+    const journalMatch = key.match(/^dd-journal-(\d{4})-(\d{2})$/);
 
-    if (checksMatch || metricsMatch || notesMatch) {
-      const match = checksMatch || metricsMatch || notesMatch;
+    if (checksMatch || metricsMatch || notesMatch || journalMatch) {
+      const match = checksMatch || metricsMatch || notesMatch || journalMatch;
       const mk = `${match[1]}-${match[2]}`;
       const ref = db.collection('users').doc(uid).collection('months').doc(mk);
       const data = {};
       const checksKey = `dd-checks-${mk}`;
       const metricsKey = `dd-metrics-${mk}`;
       const notesKey = `dd-notes-${mk}`;
+      const journalKey = `dd-journal-${mk}`;
       if (localStorage.getItem(checksKey)) data.checks = JSON.parse(localStorage.getItem(checksKey));
       if (localStorage.getItem(metricsKey)) data.metrics = JSON.parse(localStorage.getItem(metricsKey));
       if (localStorage.getItem(notesKey)) data.notes = JSON.parse(localStorage.getItem(notesKey));
+      if (localStorage.getItem(journalKey)) data.journal = JSON.parse(localStorage.getItem(journalKey));
       if (Object.keys(data).length > 0) {
         await ref.set(data, { merge: true });
       }
@@ -289,6 +295,49 @@ function flattenHabits(config) {
 }
 
 const COLORS_PRESET = ['#00B894','#FFD700','#E94560','#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#6366F1','#EF4444'];
+
+const DAY_ABBR = ['S','M','T','W','T','F','S'];
+
+const WEEK_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
+
+function getWeekNumber(year, month, day) {
+  const d = new Date(year, month, day);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 3 - (d.getDay() + 6) % 7);
+  const week1 = new Date(d.getFullYear(), 0, 4);
+  return 1 + Math.round(((d - week1) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}
+
+function computeWeekGroups(year, month, daysInMonth) {
+  const groups = [];
+  let currentWeek = -1;
+  let colorIdx = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const wn = getWeekNumber(year, month, d);
+    if (wn !== currentWeek) {
+      groups.push({ weekNum: wn, startDay: d, endDay: d, color: WEEK_COLORS[colorIdx % WEEK_COLORS.length] });
+      currentWeek = wn;
+      colorIdx++;
+    } else {
+      groups[groups.length - 1].endDay = d;
+    }
+  }
+  groups.forEach(g => { g.colSpan = g.endDay - g.startDay + 1; });
+  return groups;
+}
+
+function getDayOfWeek(year, month, day) {
+  return new Date(year, month, day).getDay();
+}
+
+// ─── Journal Storage ─────────────────────────────────────────
+function loadJournal(year, month) {
+  return loadJSON(`dd-journal-${monthKey(year, month)}`, []);
+}
+
+function saveJournal(year, month, data) {
+  saveJSON(`dd-journal-${monthKey(year, month)}`, data);
+}
 
 // ─── Header ───────────────────────────────────────────────────
 function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, user, onSignIn, syncStatus }) {
@@ -405,31 +454,138 @@ function DailyChart({ dailyData }) {
 }
 
 // ─── Habit Grid ───────────────────────────────────────────────
-function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed, toggleCollapse, daysInMonth, habitStats }) {
+function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed, toggleCollapse, daysInMonth, habitStats, month, year }) {
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
   const NAME_W = 150;
   const CELL_W = 28;
   const CELL_GAP = 1;
-  const STATS_W = 140;
+  const STATS_W = 196;
+
+  const now = new Date();
+  const isCurrentMonth = month === now.getMonth() && year === now.getFullYear();
+  const today = isCurrentMonth ? now.getDate() : -1;
+  const isFutureMonth = year > now.getFullYear() || (year === now.getFullYear() && month > now.getMonth());
+
+  const weekGroups = useMemo(() => computeWeekGroups(year, month, daysInMonth), [year, month, daysInMonth]);
+
+  // Map day -> week color for quick lookup
+  const dayWeekColor = useMemo(() => {
+    const map = {};
+    weekGroups.forEach(g => {
+      for (let d = g.startDay; d <= g.endDay; d++) map[d] = g.color;
+    });
+    return map;
+  }, [weekGroups]);
+
+  // Boolean habits for summary rows
+  const boolHabits = useMemo(() =>
+    config.categories.flatMap(c => c.habits.filter(h => h.type !== 'number')),
+    [config]
+  );
+
+  // Per-day summary stats
+  const daySummary = useMemo(() => {
+    const result = {};
+    days.forEach(d => {
+      let completed = 0, total = boolHabits.length;
+      boolHabits.forEach(h => { if (checks[cellKey(h.id, d)]) completed++; });
+      result[d] = { completed, incomplete: total - completed, pct: total > 0 ? Math.round((completed / total) * 100) : 0 };
+    });
+    return result;
+  }, [days, boolHabits, checks]);
+
+  // Compute total grid width for day columns (no flex stretch)
+  const mondayCount = days.filter(d => getDayOfWeek(year, month, d) === 1 && d > 1).length;
+  const DAYS_W = daysInMonth * (CELL_W + CELL_GAP) - CELL_GAP + mondayCount * 6;
 
   return (
     <div style={{ background: '#1A1F35', borderRadius: 12, padding: '24px 16px', marginBottom: 24, overflowX: 'auto' }}>
       <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Habit Grid</h2>
-      <div>
-        {/* Header row */}
+      <div style={{ display: 'inline-flex', flexDirection: 'column', minWidth: '100%' }}>
+        {/* Week band header row */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 0 }}>
+          <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }} />
+          <div style={{ display: 'flex', gap: 0, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+            {weekGroups.map((g, gi) => {
+              // Calculate total width: colSpan cells + gaps + Monday separators
+              let totalW = g.colSpan * (CELL_W + CELL_GAP) - CELL_GAP;
+              // Add Monday separator gap for any Monday in this group (except day 1)
+              for (let d = g.startDay; d <= g.endDay; d++) {
+                const dow = getDayOfWeek(year, month, d);
+                if (dow === 1 && d > 1) totalW += 6;
+              }
+              return (
+                <div key={g.weekNum} style={{
+                  width: totalW, minWidth: totalW, textAlign: 'center',
+                  background: g.color + '30', color: g.color,
+                  fontSize: 12, fontWeight: 700, padding: '4px 0',
+                  borderRadius: gi === 0 ? '4px 0 0 4px' : gi === weekGroups.length - 1 ? '0 4px 4px 0' : 0,
+                  borderRight: gi < weekGroups.length - 1 ? '1px solid #1A1F35' : 'none',
+                  marginLeft: gi > 0 ? 1 : 0,
+                }}>
+                  Wk {g.weekNum}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ width: STATS_W, minWidth: STATS_W, flexShrink: 0, marginLeft: 8 }} />
+        </div>
+
+        {/* Day-of-week header row */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 0 }}>
+          <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }} />
+          <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+            {days.map(d => {
+              const dow = getDayOfWeek(year, month, d);
+              const isMonday = dow === 1 && d > 1;
+              const isWeekend = dow === 0 || dow === 6;
+              const wc = dayWeekColor[d];
+              return (
+                <div key={d} style={{
+                  width: CELL_W, minWidth: CELL_W, textAlign: 'center',
+                  color: isWeekend ? '#E9456080' : wc + 'AA',
+                  fontSize: 11, fontWeight: isWeekend ? 700 : 500,
+                  marginLeft: isMonday ? 6 : 0,
+                  background: wc + '10', borderRadius: 2,
+                }}>
+                  {DAY_ABBR[dow]}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ width: STATS_W, minWidth: STATS_W, flexShrink: 0, marginLeft: 8 }} />
+        </div>
+
+        {/* Day number header row */}
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
           <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }}>
-            <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>HABIT</span>
+            <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600 }}>HABIT</span>
           </div>
-          <div style={{ display: 'flex', gap: CELL_GAP, flex: 1 }}>
-            {days.map(d => (
-              <div key={d} style={{ width: CELL_W, minWidth: CELL_W, textAlign: 'center', color: '#94A3B8', fontSize: 10, fontWeight: 500 }}>{d}</div>
-            ))}
+          <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+            {days.map(d => {
+              const dow = getDayOfWeek(year, month, d);
+              const isMonday = dow === 1 && d > 1;
+              const isToday = d === today;
+              const wc = dayWeekColor[d];
+              return (
+                <div key={d} style={{
+                  width: CELL_W, minWidth: CELL_W, textAlign: 'center', fontSize: 12, fontWeight: isToday ? 700 : 500,
+                  color: isToday ? '#fff' : wc + 'BB',
+                  marginLeft: isMonday ? 6 : 0,
+                  background: wc + '10', borderRadius: 2,
+                }}>
+                  {isToday ? (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 20, height: 20, borderRadius: '50%', background: '#3B82F6', fontSize: 12, fontWeight: 700, color: '#fff' }}>{d}</span>
+                  ) : d}
+                </div>
+              );
+            })}
           </div>
-          <div style={{ display: 'flex', gap: 4, marginLeft: 8, width: STATS_W, minWidth: STATS_W, flexShrink: 0 }}>
-            <span style={{ color: '#94A3B8', fontSize: 10, fontWeight: 600, width: 50, textAlign: 'center' }}>PROG</span>
-            <span style={{ color: '#94A3B8', fontSize: 10, fontWeight: 600, width: 32, textAlign: 'center' }}>%</span>
-            <span style={{ color: '#94A3B8', fontSize: 10, fontWeight: 600, width: 44, textAlign: 'center' }}>STREAK</span>
+          <div style={{ display: 'flex', marginLeft: 8, width: STATS_W, minWidth: STATS_W, flexShrink: 0 }}>
+            <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, width: 36, textAlign: 'center' }}>SUM</span>
+            <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, width: 36, textAlign: 'center', borderLeft: '1px solid #374151', paddingLeft: 4 }}>GOAL</span>
+            <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, width: 72, textAlign: 'center', borderLeft: '1px solid #374151', paddingLeft: 4 }}>PROG</span>
+            <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, width: 44, textAlign: 'center', borderLeft: '1px solid #374151', paddingLeft: 4 }}>STREAK</span>
           </div>
         </div>
 
@@ -447,6 +603,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
               {!isCollapsed && cat.habits.map(habit => {
                 const stats = habitStats[habit.id] || { done: 0, pct: 0, remaining: 0, streak: 0, sum: 0, avg: 0, entries: 0 };
                 const isNumber = habit.type === 'number';
+                const sumVal = isNumber ? (stats.entries > 0 ? stats.avg : '\u2014') : stats.done;
+                const goalVal = isNumber ? (habit.goal || '\u2014') : (stats.goal || daysInMonth);
                 return (
                   <div key={habit.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0', transition: 'background 150ms' }}
                     onMouseEnter={e => e.currentTarget.style.background = '#252B4540'}
@@ -454,11 +612,19 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                   >
                     <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4, display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
                       <span style={{ color: '#E2E8F0', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{habit.name}</span>
-                      {isNumber && <span style={{ color: '#94A3B8', fontSize: 9, flexShrink: 0 }}>({habit.unit})</span>}
+                      {isNumber && (
+                        <span style={{ color: '#94A3B8', fontSize: 9, flexShrink: 0 }}>{habit.unit}</span>
+                      )}
                     </div>
-                    <div style={{ display: 'flex', gap: CELL_GAP, flex: 1 }}>
+                    <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
                       {days.map(d => {
                         const key = cellKey(habit.id, d);
+                        const dow = getDayOfWeek(year, month, d);
+                        const isMonday = dow === 1 && d > 1;
+                        const isToday = d === today;
+                        const isFuture = isFutureMonth || (isCurrentMonth && d > today);
+                        const todayBg = isToday ? 'rgba(59,130,246,0.08)' : undefined;
+                        const weekTint = dayWeekColor[d] + '0D'; // ~5% opacity
                         if (isNumber) {
                           const val = metrics[key];
                           return (
@@ -466,7 +632,15 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                               key={d}
                               type="text"
                               inputMode="decimal"
-                              style={{ width: CELL_W, minWidth: CELL_W, height: 26, background: val !== undefined && val !== '' ? 'rgba(59,130,246,0.15)' : '#252B45', color: '#E2E8F0', border: `1px solid ${val !== undefined && val !== '' ? '#3B82F6' : '#374151'}`, borderRadius: 3, textAlign: 'center', fontSize: 10, outline: 'none', padding: 0 }}
+                              disabled={isFuture}
+                              style={{
+                                width: CELL_W, minWidth: CELL_W, height: 26,
+                                background: isFuture ? '#1A1F35' : (val !== undefined && val !== '' ? 'rgba(59,130,246,0.15)' : (todayBg || weekTint)),
+                                color: '#E2E8F0', border: `1px solid ${val !== undefined && val !== '' ? '#3B82F6' : '#374151'}`,
+                                borderRadius: 3, textAlign: 'center', fontSize: 10, outline: 'none', padding: 0,
+                                opacity: isFuture ? 0.3 : 1, cursor: isFuture ? 'not-allowed' : 'text',
+                                marginLeft: isMonday ? 6 : 0, borderLeft: isMonday ? '2px solid #374151' : undefined,
+                              }}
                               value={val !== undefined ? val : ''}
                               onChange={e => {
                                 const v = e.target.value;
@@ -487,30 +661,38 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                         }
                         const checked = !!checks[key];
                         return (
-                          <div key={d} onClick={() => toggleCheck(key)} style={{
+                          <div key={d} onClick={() => !isFuture && toggleCheck(key)} style={{
                             width: CELL_W, minWidth: CELL_W, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: 'pointer', borderRadius: 3,
-                            background: checked ? `${cat.color}25` : '#252B45',
+                            cursor: isFuture ? 'not-allowed' : 'pointer', borderRadius: 3,
+                            background: isFuture ? '#1A1F35' : (checked ? `${cat.color}25` : (todayBg || weekTint)),
                             border: `1px solid ${checked ? cat.color : '#374151'}`,
                             transition: 'all 150ms',
+                            opacity: isFuture ? 0.3 : 1,
+                            marginLeft: isMonday ? 6 : 0, borderLeft: isMonday ? '2px solid #374151' : undefined,
                           }}>
                             {checked && <span style={{ color: cat.color, fontSize: 13, fontWeight: 700 }}>{'\u2713'}</span>}
                           </div>
                         );
                       })}
                     </div>
-                    <div style={{ display: 'flex', gap: 4, marginLeft: 8, alignItems: 'center', width: STATS_W, minWidth: STATS_W, flexShrink: 0 }}>
-                      <div style={{ width: 50, height: 6, background: '#252B45', borderRadius: 3, overflow: 'hidden' }}>
-                        <div style={{ height: '100%', borderRadius: 3, background: cat.color, width: `${Math.min(stats.pct, 100)}%`, transition: 'width 300ms ease' }} />
-                      </div>
-                      <span style={{ color: '#E2E8F0', fontSize: 11, fontWeight: 600, width: 32, textAlign: 'center' }}>
-                        {isNumber ? (stats.entries > 0 ? `${stats.entries}` : '0') : `${stats.pct}%`}
+                    <div style={{ display: 'flex', marginLeft: 8, alignItems: 'center', width: STATS_W, minWidth: STATS_W, flexShrink: 0 }}>
+                      <span style={{ color: '#E2E8F0', fontSize: 11, fontWeight: 600, width: 36, textAlign: 'center' }}>
+                        {isNumber ? (typeof sumVal === 'number' ? (sumVal % 1 === 0 ? sumVal : sumVal.toFixed(1)) : sumVal) : sumVal}
                       </span>
-                      {stats.streak >= 2 ? (
-                        <span className="streak-badge">{'\u{1F525}'}{stats.streak}</span>
-                      ) : (
-                        <span style={{ width: 44 }}></span>
-                      )}
+                      <span style={{ color: '#94A3B8', fontSize: 11, width: 36, textAlign: 'center', borderLeft: '1px solid #374151', paddingLeft: 4 }}>
+                        {goalVal}
+                      </span>
+                      <div style={{ width: 72, display: 'flex', alignItems: 'center', gap: 3, borderLeft: '1px solid #374151', paddingLeft: 4 }}>
+                        <div style={{ width: 46, height: 7, background: '#252B45', borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ height: '100%', borderRadius: 3, background: cat.color, width: `${Math.min(stats.pct, 100)}%`, transition: 'width 300ms ease' }} />
+                        </div>
+                        <span style={{ color: '#94A3B8', fontSize: 10, width: 24 }}>{stats.pct}%</span>
+                      </div>
+                      <div style={{ borderLeft: '1px solid #374151', paddingLeft: 4, width: 44, display: 'flex', justifyContent: 'center' }}>
+                        {stats.streak >= 2 ? (
+                          <span className="streak-badge">{'\u{1F525}'}{stats.streak}</span>
+                        ) : null}
+                      </div>
                     </div>
                   </div>
                 );
@@ -518,6 +700,225 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
             </div>
           );
         })}
+
+        {/* ── Summary Rows ── */}
+        {boolHabits.length > 0 && (
+          <div style={{ borderTop: '2px solid #374151', marginTop: 8, paddingTop: 6 }}>
+            {/* Completed per day */}
+            <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
+              <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }}>
+                <span style={{ color: '#10B981', fontSize: 11, fontWeight: 600 }}>COMPLETED</span>
+              </div>
+              <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+                {days.map(d => {
+                  const isMonday = getDayOfWeek(year, month, d) === 1 && d > 1;
+                  return (
+                    <div key={d} style={{ width: CELL_W, minWidth: CELL_W, textAlign: 'center', fontSize: 11, color: '#10B981', fontWeight: 600, marginLeft: isMonday ? 6 : 0 }}>
+                      {daySummary[d].completed}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ width: STATS_W, minWidth: STATS_W, flexShrink: 0, marginLeft: 8 }}>
+                <span style={{ color: '#10B981', fontSize: 11, fontWeight: 700, display: 'inline-block', width: 36, textAlign: 'center' }}>
+                  {Object.values(daySummary).reduce((a, s) => a + s.completed, 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* Incomplete per day */}
+            <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
+              <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }}>
+                <span style={{ color: '#EF4444', fontSize: 11, fontWeight: 600 }}>INCOMPLETE</span>
+              </div>
+              <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+                {days.map(d => {
+                  const isMonday = getDayOfWeek(year, month, d) === 1 && d > 1;
+                  return (
+                    <div key={d} style={{ width: CELL_W, minWidth: CELL_W, textAlign: 'center', fontSize: 11, color: '#EF4444', fontWeight: 600, marginLeft: isMonday ? 6 : 0 }}>
+                      {daySummary[d].incomplete}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ width: STATS_W, minWidth: STATS_W, flexShrink: 0, marginLeft: 8 }}>
+                <span style={{ color: '#EF4444', fontSize: 11, fontWeight: 700, display: 'inline-block', width: 36, textAlign: 'center' }}>
+                  {Object.values(daySummary).reduce((a, s) => a + s.incomplete, 0)}
+                </span>
+              </div>
+            </div>
+
+            {/* Daily % */}
+            <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
+              <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }}>
+                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>DAILY %</span>
+              </div>
+              <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+                {days.map(d => {
+                  const isMonday = getDayOfWeek(year, month, d) === 1 && d > 1;
+                  const pct = daySummary[d].pct;
+                  return (
+                    <div key={d} style={{ width: CELL_W, minWidth: CELL_W, textAlign: 'center', fontSize: 10, color: '#E2E8F0', fontWeight: 600, marginLeft: isMonday ? 6 : 0 }}>
+                      {pct}%
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ width: STATS_W, minWidth: STATS_W, flexShrink: 0, marginLeft: 8 }} />
+            </div>
+
+            {/* Weekly summary row */}
+            <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0', marginTop: 2 }}>
+              <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }}>
+                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>WEEKLY</span>
+              </div>
+              <div style={{ display: 'flex', gap: 0, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
+                {weekGroups.map((g, gi) => {
+                  let totalW = g.colSpan * (CELL_W + CELL_GAP) - CELL_GAP;
+                  for (let d = g.startDay; d <= g.endDay; d++) {
+                    if (getDayOfWeek(year, month, d) === 1 && d > 1) totalW += 6;
+                  }
+                  let weekCompleted = 0, weekTotal = 0;
+                  for (let d = g.startDay; d <= g.endDay; d++) {
+                    weekCompleted += daySummary[d].completed;
+                    weekTotal += daySummary[d].completed + daySummary[d].incomplete;
+                  }
+                  const weekPct = weekTotal > 0 ? Math.round((weekCompleted / weekTotal) * 100) : 0;
+                  return (
+                    <div key={g.weekNum} style={{
+                      width: totalW, minWidth: totalW, textAlign: 'center',
+                      background: g.color + '20', color: g.color,
+                      fontSize: 11, fontWeight: 700, padding: '4px 0',
+                      borderRadius: gi === 0 ? '3px 0 0 3px' : gi === weekGroups.length - 1 ? '0 3px 3px 0' : 0,
+                      borderRight: gi < weekGroups.length - 1 ? '1px solid #1A1F35' : 'none',
+                      marginLeft: gi > 0 ? 1 : 0,
+                    }}>
+                      {weekCompleted}/{weekTotal} ({weekPct}%)
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ width: STATS_W, minWidth: STATS_W, flexShrink: 0, marginLeft: 8 }} />
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Monthly & Weekly Goals ──────────────────────────────────
+function GoalsPanel({ month, year }) {
+  const storageKey = `dd-goals-${monthKey(year, month)}`;
+  const [goals, setGoals] = useState(() => loadJSON(storageKey, {
+    monthly: [
+      { id: 1, text: '', done: false },
+      { id: 2, text: '', done: false },
+      { id: 3, text: '', done: false },
+    ],
+    weekly: [
+      { id: 1, text: '', done: false },
+      { id: 2, text: '', done: false },
+      { id: 3, text: '', done: false },
+    ],
+  }));
+
+  // Reload when month changes
+  useEffect(() => {
+    setGoals(loadJSON(storageKey, {
+      monthly: [
+        { id: 1, text: '', done: false },
+        { id: 2, text: '', done: false },
+        { id: 3, text: '', done: false },
+      ],
+      weekly: [
+        { id: 1, text: '', done: false },
+        { id: 2, text: '', done: false },
+        { id: 3, text: '', done: false },
+      ],
+    }));
+  }, [storageKey]);
+
+  const save = (updated) => { setGoals(updated); saveJSON(storageKey, updated); };
+
+  const updateGoal = (type, id, field, value) => {
+    const updated = { ...goals, [type]: goals[type].map(g => g.id === id ? { ...g, [field]: value } : g) };
+    save(updated);
+  };
+
+  const addGoal = (type) => {
+    if (goals[type].length >= 5) return;
+    const nextId = Math.max(0, ...goals[type].map(g => g.id)) + 1;
+    save({ ...goals, [type]: [...goals[type], { id: nextId, text: '', done: false }] });
+  };
+
+  const removeGoal = (type, id) => {
+    if (goals[type].length <= 1) return;
+    save({ ...goals, [type]: goals[type].filter(g => g.id !== id) });
+  };
+
+  const renderSection = (title, type, color) => {
+    const items = goals[type];
+    const doneCount = items.filter(g => g.done && g.text.trim()).length;
+    const totalWithText = items.filter(g => g.text.trim()).length;
+    return (
+      <div style={{ flex: 1, minWidth: 300 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ color, fontSize: 14, fontWeight: 700 }}>{title}</span>
+            {totalWithText > 0 && (
+              <span style={{ color: '#94A3B8', fontSize: 11 }}>{doneCount}/{totalWithText}</span>
+            )}
+          </div>
+          {items.length < 5 && (
+            <button onClick={() => addGoal(type)} style={{
+              background: 'none', border: `1px solid ${color}40`, color, fontSize: 11,
+              borderRadius: 4, padding: '2px 8px', cursor: 'pointer',
+            }}>+ Add</button>
+          )}
+        </div>
+        {items.map((g, i) => (
+          <div key={g.id} style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '6px 0',
+            borderBottom: i < items.length - 1 ? '1px solid #252B45' : 'none',
+          }}>
+            <div
+              onClick={() => updateGoal(type, g.id, 'done', !g.done)}
+              style={{
+                width: 20, height: 20, borderRadius: 4, flexShrink: 0, cursor: 'pointer',
+                border: `2px solid ${g.done ? color : '#374151'}`,
+                background: g.done ? color + '25' : 'transparent',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              {g.done && <span style={{ color, fontSize: 12, fontWeight: 700 }}>{'\u2713'}</span>}
+            </div>
+            <input
+              type="text"
+              value={g.text}
+              onChange={e => updateGoal(type, g.id, 'text', e.target.value)}
+              placeholder={`${title.split(' ')[0]} goal ${i + 1}...`}
+              style={{
+                flex: 1, background: 'transparent', border: 'none', outline: 'none',
+                color: g.done ? '#94A3B8' : '#E2E8F0', fontSize: 13,
+                textDecoration: g.done ? 'line-through' : 'none',
+              }}
+            />
+            {items.length > 1 && (
+              <span onClick={() => removeGoal(type, g.id)} style={{ color: '#94A3B840', fontSize: 14, cursor: 'pointer', flexShrink: 0 }}>{'\u00D7'}</span>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Goals</h2>
+      <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+        {renderSection('Monthly Goals', 'monthly', '#3B82F6')}
+        {renderSection('Weekly Goals', 'weekly', '#10B981')}
       </div>
     </div>
   );
@@ -651,19 +1052,61 @@ function Leaderboard({ config, habitStats }) {
   );
 }
 
-// ─── Notes ────────────────────────────────────────────────────
-function Notes({ notes, setNotes }) {
+// ─── Journal ─────────────────────────────────────────────────
+function Journal({ journal, setJournal }) {
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const saveEntry = () => {
+    const text = draft.trim();
+    if (!text) return;
+    setSaving(true);
+    const entry = { id: uuid(), text, date: new Date().toISOString() };
+    setJournal(prev => [entry, ...prev]);
+    setDraft('');
+    setTimeout(() => setSaving(false), 600);
+  };
+
+  const deleteEntry = (id) => {
+    setJournal(prev => prev.filter(e => e.id !== id));
+  };
+
+  const formatDate = (iso) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  };
+
   return (
     <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Weekly Reflections</h2>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Journal</h2>
       <textarea
-        value={notes}
-        onChange={e => setNotes(e.target.value)}
-        placeholder="What went well this week? What can you improve?"
-        style={{ width: '100%', minHeight: 120, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, padding: 16, fontSize: 14, lineHeight: 1.6, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }}
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        placeholder="What went well today? What can you improve?"
+        style={{ width: '100%', minHeight: 90, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, padding: 16, fontSize: 14, lineHeight: 1.6, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }}
         onFocus={e => e.target.style.borderColor = '#3B82F6'}
         onBlur={e => e.target.style.borderColor = '#374151'}
+        onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveEntry(); }}
       />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
+        <span style={{ color: '#64748B', fontSize: 11 }}>{draft.trim() ? 'Cmd+Enter to save' : ''}</span>
+        <button onClick={saveEntry} disabled={!draft.trim()} className="btn btn-primary" style={{ padding: '6px 16px', fontSize: 13, opacity: draft.trim() ? 1 : 0.5 }}>
+          {saving ? 'Saved!' : 'Save Entry'}
+        </button>
+      </div>
+      {journal.length > 0 && (
+        <div style={{ marginTop: 16, maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {journal.map(entry => (
+            <div key={entry.id} style={{ background: '#252B45', borderRadius: 8, padding: '12px 16px', borderLeft: '3px solid #3B82F6' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>{formatDate(entry.date)}</span>
+                <button onClick={() => deleteEntry(entry.id)} style={{ background: 'none', border: 'none', color: '#64748B', cursor: 'pointer', fontSize: 12, padding: '2px 6px' }} title="Delete entry">{'\u2715'}</button>
+              </div>
+              <p style={{ color: '#E2E8F0', fontSize: 13, lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>{entry.text}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -924,6 +1367,19 @@ function App() {
   const [checks, setChecksState] = useState(() => loadChecks(now.getFullYear(), now.getMonth()));
   const [metrics, setMetricsState] = useState(() => loadMetrics(now.getFullYear(), now.getMonth()));
   const [notes, setNotesState] = useState(() => loadNotes(now.getFullYear(), now.getMonth()));
+  const [journal, setJournalState] = useState(() => {
+    const j = loadJournal(now.getFullYear(), now.getMonth());
+    // Migrate old notes as first journal entry if journal is empty
+    if (j.length === 0) {
+      const oldNotes = loadNotes(now.getFullYear(), now.getMonth());
+      if (oldNotes && oldNotes.trim()) {
+        const migrated = [{ id: uuid(), text: oldNotes.trim(), date: new Date(now.getFullYear(), now.getMonth(), 1).toISOString() }];
+        saveJournal(now.getFullYear(), now.getMonth(), migrated);
+        return migrated;
+      }
+    }
+    return j;
+  });
   const [collapsed, setCollapsed] = useState(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // idle | syncing | synced | error
@@ -966,6 +1422,7 @@ function App() {
             if (cloudMonth.checks) { setChecksState(cloudMonth.checks); saveChecks(year, month, cloudMonth.checks); }
             if (cloudMonth.metrics) { setMetricsState(cloudMonth.metrics); saveMetrics(year, month, cloudMonth.metrics); }
             if (cloudMonth.notes !== undefined) { setNotesState(cloudMonth.notes); saveNotes(year, month, cloudMonth.notes); }
+            if (cloudMonth.journal) { setJournalState(cloudMonth.journal); saveJournal(year, month, cloudMonth.journal); }
           }
         }
         setSyncStatus('synced');
@@ -988,6 +1445,19 @@ function App() {
     setChecksState(loadChecks(year, month));
     setMetricsState(loadMetrics(year, month));
     setNotesState(loadNotes(year, month));
+    const j = loadJournal(year, month);
+    if (j.length === 0) {
+      const oldNotes = loadNotes(year, month);
+      if (oldNotes && oldNotes.trim()) {
+        const migrated = [{ id: uuid(), text: oldNotes.trim(), date: new Date(year, month, 1).toISOString() }];
+        saveJournal(year, month, migrated);
+        setJournalState(migrated);
+      } else {
+        setJournalState([]);
+      }
+    } else {
+      setJournalState(j);
+    }
 
     // Also fetch from cloud in background
     if (user) {
@@ -999,6 +1469,7 @@ function App() {
             if (cloudMonth.checks) { setChecksState(cloudMonth.checks); saveChecks(year, month, cloudMonth.checks); }
             if (cloudMonth.metrics) { setMetricsState(cloudMonth.metrics); saveMetrics(year, month, cloudMonth.metrics); }
             if (cloudMonth.notes !== undefined) { setNotesState(cloudMonth.notes); saveNotes(year, month, cloudMonth.notes); }
+            if (cloudMonth.journal) { setJournalState(cloudMonth.journal); saveJournal(year, month, cloudMonth.journal); }
           }
           setSyncStatus('synced');
         } catch (err) {
@@ -1011,11 +1482,11 @@ function App() {
 
   // Debounced cloud save helper
   const cloudSaveTimeout = useRef(null);
-  const scheduleCloudSave = useCallback((checksVal, metricsVal, notesVal) => {
+  const scheduleCloudSave = useCallback((checksVal, metricsVal, notesVal, journalVal) => {
     if (!user) return;
     clearTimeout(cloudSaveTimeout.current);
     cloudSaveTimeout.current = setTimeout(() => {
-      saveMonthCloud(year, month, checksVal, metricsVal, notesVal, user.uid);
+      saveMonthCloud(year, month, checksVal, metricsVal, notesVal, user.uid, journalVal);
       setSyncStatus('synced');
     }, 1000);
     setSyncStatus('syncing');
@@ -1047,6 +1518,16 @@ function App() {
     setNotesState(val);
     saveNotes(year, month, val);
     scheduleCloudSave(loadChecks(year, month), loadMetrics(year, month), val);
+  }, [year, month, scheduleCloudSave]);
+
+  // Persist journal (local immediately, cloud debounced)
+  const setJournal = useCallback((updater) => {
+    setJournalState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveJournal(year, month, next);
+      scheduleCloudSave(loadChecks(year, month), loadMetrics(year, month), loadNotes(year, month), next);
+      return next;
+    });
   }, [year, month, scheduleCloudSave]);
 
   const toggleCheck = useCallback((key) => {
@@ -1157,11 +1638,12 @@ function App() {
       <Header month={month} year={year} setMonth={setMonth} setYear={setYear} overallPct={overallPct} onOpenSettings={() => setSettingsOpen(true)} user={user} onSignIn={signIn} syncStatus={syncStatus} />
       <DashboardCards totalDone={totalDone} totalPossible={totalPossible} bestStreak={bestStreak} todayScore={todayScore} todayTotal={todayTotal} />
       <DailyChart dailyData={dailyData} />
-      <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} />
+      <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} month={month} year={year} />
+      <GoalsPanel month={month} year={year} />
       <MetricsDashboard config={config} metrics={metrics} daysInMonth={daysInMonth} />
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24 }}>
         <WeeklySummary weeklyData={weeklyData} />
-        <Notes notes={notes} setNotes={setNotes} />
+        <Journal journal={journal} setJournal={setJournal} />
       </div>
       <Leaderboard config={config} habitStats={habitStats} />
       <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} config={config} setConfig={setConfig} user={user} onSignOut={signOut} />
