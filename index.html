@@ -44,7 +44,10 @@
     .num-cell:focus { border-color: #3B82F6; }
     .num-cell.has-value { background: rgba(59,130,246,0.15); border-color: #3B82F6; }
     .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
-    .freeze-col { position: -webkit-sticky !important; position: sticky !important; left: 0 !important; z-index: 3 !important; background: #1A1F35 !important; box-shadow: 4px 0 6px -2px rgba(0,0,0,0.3); }
+    .freeze-col { position: -webkit-sticky !important; position: sticky !important; left: 0 !important; z-index: 10 !important; background: #1A1F35 !important; box-shadow: -24px 0 0 0 #1A1F35, 4px 0 6px -2px rgba(0,0,0,0.3) !important; align-self: stretch; }
+    .habit-row { display: flex; align-items: center; min-height: 32px; transition: background 150ms; }
+    .category-row { display: flex; align-items: center; min-height: 36px; cursor: pointer; margin-bottom: 2px; user-select: none; }
+    .summary-row { display: flex; align-items: center; min-height: 28px; }
     @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .animate-in { animation: slideIn 300ms ease forwards; }
   </style>
@@ -531,8 +534,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
       <div style={{ overflowX: 'auto', padding: isMobile ? '0 0 12px 0' : '0 16px 24px 16px', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ display: 'inline-flex', flexDirection: 'column', minWidth: '100%' }}>
         {/* Week band header row */}
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 0 }}>
-          <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }} />
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 0, minHeight: 24 }}>
+          <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }} />
           <div style={{ display: 'flex', gap: 0, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
             {weekGroups.map((g, gi) => {
               // Calculate total width: colSpan cells + gaps + Monday separators
@@ -560,8 +563,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
         </div>
 
         {/* Day-of-week header row */}
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 0 }}>
-          <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }} />
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 0, minHeight: 24 }}>
+          <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }} />
           <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
             {days.map(d => {
               const dow = getDayOfWeek(year, month, d);
@@ -585,8 +588,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
         </div>
 
         {/* Day number header row */}
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
-          <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4, minHeight: 24 }}>
+          <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
             <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600 }}>HABIT</span>
           </div>
           <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
@@ -621,7 +624,7 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
           const isCollapsed = collapsed.has(cat.id);
           return (
             <div key={cat.id}>
-              <div onClick={() => toggleCollapse(cat.id)} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', cursor: 'pointer', borderBottom: `2px solid ${cat.color}20`, marginBottom: 2, userSelect: 'none' }}>
+              <div className="category-row" onClick={() => toggleCollapse(cat.id)} style={{ borderBottom: `2px solid ${cat.color}20` }}>
                 <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ color: cat.color, fontSize: 9, transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 200ms', display: 'inline-block' }}>{'\u25BC'}</span>
                   <span style={{ color: cat.color, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>{cat.name}</span>
@@ -634,7 +637,7 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                 const sumVal = isNumber ? (stats.entries > 0 ? stats.avg : '\u2014') : stats.done;
                 const goalVal = isNumber ? (habit.goal || '\u2014') : (stats.goal || daysInMonth);
                 return (
-                  <div key={habit.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0', transition: 'background 150ms' }}
+                  <div key={habit.id} className="habit-row"
                     onMouseEnter={e => e.currentTarget.style.background = '#252B4540'}
                     onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
                   >
@@ -733,8 +736,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
         {boolHabits.length > 0 && (
           <div style={{ borderTop: '2px solid #374151', marginTop: 8, paddingTop: 6 }}>
             {/* Completed per day */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
-              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }}>
+            <div className="summary-row">
+              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
                 <span style={{ color: '#10B981', fontSize: 11, fontWeight: 600 }}>COMPLETED</span>
               </div>
               <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
@@ -755,8 +758,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
             </div>
 
             {/* Incomplete per day */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
-              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }}>
+            <div className="summary-row">
+              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
                 <span style={{ color: '#EF4444', fontSize: 11, fontWeight: 600 }}>INCOMPLETE</span>
               </div>
               <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
@@ -777,8 +780,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
             </div>
 
             {/* Daily % */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '2px 0' }}>
-              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }}>
+            <div className="summary-row">
+              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
                 <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>DAILY %</span>
               </div>
               <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
@@ -796,8 +799,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
             </div>
 
             {/* Weekly summary row */}
-            <div style={{ display: 'flex', alignItems: 'center', padding: '4px 0', marginTop: 2 }}>
-              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4 }}>
+            <div className="summary-row" style={{ marginTop: 2 }}>
+              <div className="freeze-col" style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, paddingRight: 4, display: 'flex', alignItems: 'center' }}>
                 <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>WEEKLY</span>
               </div>
               <div style={{ display: 'flex', gap: 0, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
