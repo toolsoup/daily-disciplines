@@ -44,8 +44,7 @@
     .num-cell:focus { border-color: #3B82F6; }
     .num-cell.has-value { background: rgba(59,130,246,0.15); border-color: #3B82F6; }
     .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
-    .freeze-col { position: -webkit-sticky; position: sticky; left: 0; z-index: 3; background: #1A1F35; }
-    .freeze-col::after { content: ''; position: absolute; top: 0; bottom: 0; right: -6px; width: 6px; background: linear-gradient(to right, rgba(0,0,0,0.2), transparent); pointer-events: none; }
+    .freeze-col { position: -webkit-sticky !important; position: sticky !important; left: 0 !important; z-index: 3 !important; background: #1A1F35 !important; box-shadow: 4px 0 6px -2px rgba(0,0,0,0.3); }
     @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     .animate-in { animation: slideIn 300ms ease forwards; }
   </style>
