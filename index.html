@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Daily Disciplines v2 — Habit Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script src="https://unpkg.com/recharts@2.12.7/umd/Recharts.js"></script>
+  <!-- Firebase CDN (compat builds for global firebase.*) -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0F1629;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+      color: #E2E8F0;
+      min-height: 100vh;
+    }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1A1F35; }
+    ::-webkit-scrollbar-thumb { background: #252B45; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #3B82F6; }
+    .settings-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 50; opacity: 0; transition: opacity 200ms; pointer-events: none; }
+    .settings-overlay.open { opacity: 1; pointer-events: auto; }
+    .settings-drawer { position: fixed; top: 0; right: -480px; width: 480px; max-width: 95vw; height: 100vh; background: #1A1F35; z-index: 51; transition: right 300ms ease; overflow-y: auto; box-shadow: -4px 0 20px rgba(0,0,0,0.4); }
+    .settings-drawer.open { right: 0; }
+    .btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 150ms; }
+    .btn-primary { background: #3B82F6; color: white; }
+    .btn-primary:hover { background: #2563EB; }
+    .btn-danger { background: #E94560; color: white; }
+    .btn-danger:hover { background: #DC2626; }
+    .btn-ghost { background: transparent; color: #94A3B8; border: 1px solid #374151; }
+    .btn-ghost:hover { background: #252B45; color: #E2E8F0; }
+    .input { background: #252B45; color: #E2E8F0; border: 1px solid #374151; border-radius: 8px; padding: 8px 12px; font-size: 14px; outline: none; width: 100%; }
+    .input:focus { border-color: #3B82F6; }
+    .select { background: #252B45; color: #E2E8F0; border: 1px solid #374151; border-radius: 8px; padding: 8px 12px; font-size: 14px; cursor: pointer; outline: none; }
+    .num-cell { width: 32px; height: 28px; background: #252B45; color: #E2E8F0; border: 1px solid #374151; border-radius: 4px; text-align: center; font-size: 11px; outline: none; padding: 0; }
+    .num-cell:focus { border-color: #3B82F6; }
+    .num-cell.has-value { background: rgba(59,130,246,0.15); border-color: #3B82F6; }
+    .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
+    @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .animate-in { animation: slideIn 300ms ease forwards; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+// ─── Firebase Init ───────────────────────────────────────────
+// TODO: Replace with your Firebase project config from console.firebase.google.com
+firebase.initializeApp({
+  apiKey: "AIzaSyDb-6rAPbP_jOUvFBbNjJx3DvzEscEL1bc",
+  authDomain: "daily-disciplines-a7610.firebaseapp.com",
+  projectId: "daily-disciplines-a7610",
+  storageBucket: "daily-disciplines-a7610.firebasestorage.app",
+  messagingSenderId: "1025794745008",
+  appId: "1:1025794745008:web:90da7f6105b40480905175"
+});
+const firebaseAuth = firebase.auth();
+const db = firebase.firestore();
+
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
+const {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell, ReferenceLine, Area, AreaChart,
+  BarChart, Bar, Legend
+} = Recharts;
+
+// ─── UUID Generator ───────────────────────────────────────────
+function uuid() {
+  return 'xxxx-xxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16));
+}
+
+// ─── Default Config ───────────────────────────────────────────
+const DEFAULT_CONFIG = {
+  categories: [
+    {
+      id: uuid(), name: 'Health', color: '#00B894',
+      habits: [
+        { id: uuid(), name: 'Water (64oz+)', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Exercise', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Sleep 7h+', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Healthy Eating', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'No Alcohol', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Weight', type: 'number', unit: 'lbs', goal: null, direction: 'down' },
+      ],
+    },
+    {
+      id: uuid(), name: 'Personal Growth', color: '#FFD700',
+      habits: [
+        { id: uuid(), name: 'Read', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Pages Read', type: 'number', unit: 'pages', goal: 30, direction: 'up' },
+        { id: uuid(), name: 'Journal / Reflect', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Meditate', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Learn Something New', type: 'boolean', goal: 30 },
+      ],
+    },
+    {
+      id: uuid(), name: 'Content & Business', color: '#E94560',
+      habits: [
+        { id: uuid(), name: 'Prospecting / Outreach', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'YouTube Script / Record', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Post on LinkedIn', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Engage Skool', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Review Financials', type: 'boolean', goal: 4 },
+      ],
+    },
+  ],
+};
+
+// ─── Storage Helpers ──────────────────────────────────────────
+function loadJSON(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch { return fallback; }
+}
+
+function saveJSON(key, data) {
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+function monthKey(year, month) {
+  return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+function loadConfig() {
+  return loadJSON('dd-config', null) || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+
+function saveConfig(config) {
+  saveJSON('dd-config', config);
+}
+
+function loadChecks(year, month) {
+  return loadJSON(`dd-checks-${monthKey(year, month)}`, {});
+}
+
+function saveChecks(year, month, data) {
+  saveJSON(`dd-checks-${monthKey(year, month)}`, data);
+}
+
+function loadMetrics(year, month) {
+  return loadJSON(`dd-metrics-${monthKey(year, month)}`, {});
+}
+
+function saveMetrics(year, month, data) {
+  saveJSON(`dd-metrics-${monthKey(year, month)}`, data);
+}
+
+function loadNotes(year, month) {
+  return loadJSON(`dd-notes-${monthKey(year, month)}`, '');
+}
+
+function saveNotes(year, month, data) {
+  saveJSON(`dd-notes-${monthKey(year, month)}`, data);
+}
+
+// ─── useAuth Hook ────────────────────────────────────────────
+function useAuth() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsub = firebaseAuth.onAuthStateChanged((u) => {
+      setUser(u);
+      setLoading(false);
+    });
+    return unsub;
+  }, []);
+
+  const signIn = useCallback(async () => {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    try {
+      await firebaseAuth.signInWithPopup(provider);
+    } catch (err) {
+      console.error('Sign-in error:', err);
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try {
+      await firebaseAuth.signOut();
+    } catch (err) {
+      console.error('Sign-out error:', err);
+    }
+  }, []);
+
+  return { user, loading, signIn, signOut };
+}
+
+// ─── Cloud Storage (Firestore) ───────────────────────────────
+function firestoreConfigRef(uid) {
+  return db.collection('users').doc(uid).collection('data').doc('config');
+}
+
+function firestoreMonthRef(uid, year, month) {
+  return db.collection('users').doc(uid).collection('months').doc(monthKey(year, month));
+}
+
+async function saveConfigCloud(config, uid) {
+  saveConfig(config);
+  if (!uid) return;
+  try {
+    await firestoreConfigRef(uid).set({ categories: config.categories }, { merge: true });
+  } catch (err) { console.error('Cloud config save error:', err); }
+}
+
+async function saveMonthCloud(year, month, checks, metrics, notes, uid) {
+  saveChecks(year, month, checks);
+  saveMetrics(year, month, metrics);
+  saveNotes(year, month, notes);
+  if (!uid) return;
+  try {
+    await firestoreMonthRef(uid, year, month).set({ checks, metrics, notes }, { merge: true });
+  } catch (err) { console.error('Cloud month save error:', err); }
+}
+
+async function loadConfigCloud(uid) {
+  try {
+    const snap = await firestoreConfigRef(uid).get();
+    if (snap.exists) return snap.data();
+  } catch (err) { console.error('Cloud config load error:', err); }
+  return null;
+}
+
+async function loadMonthCloud(uid, year, month) {
+  try {
+    const snap = await firestoreMonthRef(uid, year, month).get();
+    if (snap.exists) return snap.data();
+  } catch (err) { console.error('Cloud month load error:', err); }
+  return null;
+}
+
+// Migrate all localStorage dd-* data to Firestore on first sign-in
+async function migrateLocalToCloud(uid) {
+  // Upload config
+  const config = loadConfig();
+  await firestoreConfigRef(uid).set({ categories: config.categories }, { merge: true });
+
+  // Find all dd-checks-*, dd-metrics-*, dd-notes-* keys
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (!key) continue;
+    const checksMatch = key.match(/^dd-checks-(\d{4})-(\d{2})$/);
+    const metricsMatch = key.match(/^dd-metrics-(\d{4})-(\d{2})$/);
+    const notesMatch = key.match(/^dd-notes-(\d{4})-(\d{2})$/);
+
+    if (checksMatch || metricsMatch || notesMatch) {
+      const match = checksMatch || metricsMatch || notesMatch;
+      const mk = `${match[1]}-${match[2]}`;
+      const ref = db.collection('users').doc(uid).collection('months').doc(mk);
+      const data = {};
+      const checksKey = `dd-checks-${mk}`;
+      const metricsKey = `dd-metrics-${mk}`;
+      const notesKey = `dd-notes-${mk}`;
+      if (localStorage.getItem(checksKey)) data.checks = JSON.parse(localStorage.getItem(checksKey));
+      if (localStorage.getItem(metricsKey)) data.metrics = JSON.parse(localStorage.getItem(metricsKey));
+      if (localStorage.getItem(notesKey)) data.notes = JSON.parse(localStorage.getItem(notesKey));
+      if (Object.keys(data).length > 0) {
+        await ref.set(data, { merge: true });
+      }
+    }
+  }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────
+function getDaysInMonth(month, year) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function getMonthName(month) {
+  return ['January','February','March','April','May','June','July','August','September','October','November','December'][month];
+}
+
+function cellKey(habitId, day) {
+  return `${habitId}-${day}`;
+}
+
+function flattenHabits(config) {
+  return config.categories.flatMap(c =>
+    c.habits.map(h => ({ ...h, categoryId: c.id, categoryColor: c.color, categoryName: c.name }))
+  );
+}
+
+const COLORS_PRESET = ['#00B894','#FFD700','#E94560','#3B82F6','#8B5CF6','#EC4899','#F97316','#14B8A6','#6366F1','#EF4444'];
+
+// ─── Header ───────────────────────────────────────────────────
+function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, user, onSignIn, syncStatus }) {
+  const months = Array.from({ length: 12 }, (_, i) => i);
+  const years = [2024, 2025, 2026, 2027, 2028];
+  const pieData = [
+    { name: 'Done', value: overallPct },
+    { name: 'Left', value: Math.max(0, 100 - overallPct) },
+  ];
+
+  return (
+    <div style={{ position: 'sticky', top: 0, zIndex: 40, background: '#0F1629', paddingTop: 24, paddingBottom: 0, marginBottom: 24 }}>
+      <div style={{ background: '#1A1F35', borderRadius: 16, padding: '20px 32px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}>
+        <div>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: '#E2E8F0', marginBottom: 4 }}>Daily Disciplines</h1>
+          <p style={{ color: '#94A3B8', fontSize: 14 }}>Track your habits. Build your future.</p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <select value={month} onChange={e => setMonth(Number(e.target.value))} className="select">
+            {months.map(m => <option key={m} value={m}>{getMonthName(m)}</option>)}
+          </select>
+          <select value={year} onChange={e => setYear(Number(e.target.value))} className="select">
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+
+          {/* Auth: Sign in or show avatar */}
+          {user ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {syncStatus === 'syncing' && <span style={{ color: '#FFD700', fontSize: 14 }} title="Syncing...">{'\u21BB'}</span>}
+              {syncStatus === 'synced' && <span style={{ color: '#00B894', fontSize: 14 }} title="Synced">{'\u2601'}</span>}
+              {syncStatus === 'error' && <span style={{ color: '#E94560', fontSize: 14 }} title="Sync error">{'\u2601'}</span>}
+              <img src={user.photoURL} alt="" style={{ width: 28, height: 28, borderRadius: '50%', border: '2px solid #3B82F6' }} referrerPolicy="no-referrer" />
+              <span style={{ color: '#E2E8F0', fontSize: 12, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.displayName?.split(' ')[0]}</span>
+            </div>
+          ) : (
+            <button onClick={onSignIn} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
+              Sign in
+            </button>
+          )}
+
+          <button onClick={onOpenSettings} className="btn btn-ghost" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Settings
+          </button>
+        </div>
+
+        <div style={{ position: 'relative', width: 80, height: 80 }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={pieData} cx="50%" cy="50%" innerRadius={28} outerRadius={38} dataKey="value" startAngle={90} endAngle={-270} strokeWidth={0}>
+                <Cell fill="#3B82F6" />
+                <Cell fill="#252B45" />
+              </Pie>
+            </PieChart>
+          </ResponsiveContainer>
+          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
+            <span style={{ fontSize: 16, fontWeight: 700, color: '#3B82F6' }}>{overallPct}%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Dashboard Cards ──────────────────────────────────────────
+function DashboardCards({ totalDone, totalPossible, bestStreak, todayScore, todayTotal }) {
+  const cards = [
+    { title: 'Monthly Progress', value: `${totalDone} / ${totalPossible}`, sub: `${totalPossible > 0 ? Math.round((totalDone / totalPossible) * 100) : 0}% complete`, color: '#3B82F6', icon: '\u{1F4CA}' },
+    { title: 'Best Streak', value: bestStreak.count > 0 ? `${bestStreak.count} days` : '\u2014', sub: bestStreak.count > 0 ? bestStreak.habit : 'No streaks yet', color: '#00B894', icon: '\u{1F525}' },
+    { title: "Today's Score", value: `${todayScore} / ${todayTotal}`, sub: `${todayTotal > 0 ? Math.round((todayScore / todayTotal) * 100) : 0}%`, color: '#FFD700', icon: '\u2B50' },
+  ];
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16, marginBottom: 24 }}>
+      {cards.map(card => (
+        <div key={card.title} className="animate-in" style={{ background: '#1A1F35', borderRadius: 12, padding: '20px 24px', borderLeft: `4px solid ${card.color}` }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 8 }}>
+            <span style={{ color: '#94A3B8', fontSize: 13, fontWeight: 500 }}>{card.title}</span>
+            <span style={{ fontSize: 20 }}>{card.icon}</span>
+          </div>
+          <div style={{ fontSize: 24, fontWeight: 700, color: '#E2E8F0', marginBottom: 4 }}>{card.value}</div>
+          <div style={{ color: '#94A3B8', fontSize: 12 }}>{card.sub}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─── Daily Chart ──────────────────────────────────────────────
+function DailyChart({ dailyData }) {
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Daily Completion Rate</h2>
+      <ResponsiveContainer width="100%" height={250}>
+        <AreaChart data={dailyData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+          <defs>
+            <linearGradient id="colorPct" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="#3B82F6" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+          <XAxis dataKey="day" stroke="#94A3B8" fontSize={12} tickLine={false} />
+          <YAxis stroke="#94A3B8" fontSize={12} tickLine={false} domain={[0, 100]} tickFormatter={v => `${v}%`} />
+          <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #252B45', borderRadius: 8, color: '#E2E8F0' }} labelFormatter={v => `Day ${v}`} formatter={v => [`${v}%`, 'Completion']} />
+          <ReferenceLine y={80} stroke="#FFD700" strokeDasharray="5 5" label={{ value: '80% goal', fill: '#FFD700', fontSize: 11, position: 'right' }} />
+          <Area type="monotone" dataKey="pct" stroke="#3B82F6" strokeWidth={2} fill="url(#colorPct)" dot={{ fill: '#3B82F6', r: 3 }} activeDot={{ r: 5, fill: '#3B82F6' }} />
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─── Habit Grid ───────────────────────────────────────────────
+function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed, toggleCollapse, daysInMonth, habitStats }) {
+  const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const NAME_W = 150;
+  const CELL_W = 28;
+  const CELL_GAP = 1;
+  const STATS_W = 140;
+
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: '24px 16px', marginBottom: 24, overflowX: 'auto' }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Habit Grid</h2>
+      <div>
+        {/* Header row */}
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 4 }}>
+          <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4 }}>
+            <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600 }}>HABIT</span>
+          </div>
+          <div style={{ display: 'flex', gap: CELL_GAP, flex: 1 }}>
+            {days.map(d => (
+              <div key={d} style={{ width: CELL_W, minWidth: CELL_W, textAlign: 'center', color: '#94A3B8', fontSize: 10, fontWeight: 500 }}>{d}</div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 4, marginLeft: 8, width: STATS_W, minWidth: STATS_W, flexShrink: 0 }}>
+            <span style={{ color: '#94A3B8', fontSize: 10, fontWeight: 600, width: 50, textAlign: 'center' }}>PROG</span>
+            <span style={{ color: '#94A3B8', fontSize: 10, fontWeight: 600, width: 32, textAlign: 'center' }}>%</span>
+            <span style={{ color: '#94A3B8', fontSize: 10, fontWeight: 600, width: 44, textAlign: 'center' }}>STREAK</span>
+          </div>
+        </div>
+
+        {config.categories.map(cat => {
+          const isCollapsed = collapsed.has(cat.id);
+          return (
+            <div key={cat.id}>
+              <div onClick={() => toggleCollapse(cat.id)} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', cursor: 'pointer', borderBottom: `2px solid ${cat.color}20`, marginBottom: 2, userSelect: 'none' }}>
+                <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: cat.color, fontSize: 9, transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition: 'transform 200ms', display: 'inline-block' }}>{'\u25BC'}</span>
+                  <span style={{ color: cat.color, fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>{cat.name}</span>
+                </div>
+              </div>
+
+              {!isCollapsed && cat.habits.map(habit => {
+                const stats = habitStats[habit.id] || { done: 0, pct: 0, remaining: 0, streak: 0, sum: 0, avg: 0, entries: 0 };
+                const isNumber = habit.type === 'number';
+                return (
+                  <div key={habit.id} style={{ display: 'flex', alignItems: 'center', padding: '3px 0', transition: 'background 150ms' }}
+                    onMouseEnter={e => e.currentTarget.style.background = '#252B4540'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                  >
+                    <div style={{ width: NAME_W, minWidth: NAME_W, flexShrink: 0, position: 'sticky', left: 0, background: '#1A1F35', zIndex: 2, paddingRight: 4, display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden' }}>
+                      <span style={{ color: '#E2E8F0', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{habit.name}</span>
+                      {isNumber && <span style={{ color: '#94A3B8', fontSize: 9, flexShrink: 0 }}>({habit.unit})</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: CELL_GAP, flex: 1 }}>
+                      {days.map(d => {
+                        const key = cellKey(habit.id, d);
+                        if (isNumber) {
+                          const val = metrics[key];
+                          return (
+                            <input
+                              key={d}
+                              type="text"
+                              inputMode="decimal"
+                              style={{ width: CELL_W, minWidth: CELL_W, height: 26, background: val !== undefined && val !== '' ? 'rgba(59,130,246,0.15)' : '#252B45', color: '#E2E8F0', border: `1px solid ${val !== undefined && val !== '' ? '#3B82F6' : '#374151'}`, borderRadius: 3, textAlign: 'center', fontSize: 10, outline: 'none', padding: 0 }}
+                              value={val !== undefined ? val : ''}
+                              onChange={e => {
+                                const v = e.target.value;
+                                if (v === '' || /^-?\d*\.?\d*$/.test(v)) {
+                                  setMetric(key, v === '' ? undefined : v);
+                                }
+                              }}
+                              onBlur={e => {
+                                const v = e.target.value;
+                                if (v !== '' && !isNaN(parseFloat(v))) {
+                                  setMetric(key, parseFloat(v));
+                                } else if (v === '') {
+                                  setMetric(key, undefined);
+                                }
+                              }}
+                            />
+                          );
+                        }
+                        const checked = !!checks[key];
+                        return (
+                          <div key={d} onClick={() => toggleCheck(key)} style={{
+                            width: CELL_W, minWidth: CELL_W, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            cursor: 'pointer', borderRadius: 3,
+                            background: checked ? `${cat.color}25` : '#252B45',
+                            border: `1px solid ${checked ? cat.color : '#374151'}`,
+                            transition: 'all 150ms',
+                          }}>
+                            {checked && <span style={{ color: cat.color, fontSize: 13, fontWeight: 700 }}>{'\u2713'}</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginLeft: 8, alignItems: 'center', width: STATS_W, minWidth: STATS_W, flexShrink: 0 }}>
+                      <div style={{ width: 50, height: 6, background: '#252B45', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', borderRadius: 3, background: cat.color, width: `${Math.min(stats.pct, 100)}%`, transition: 'width 300ms ease' }} />
+                      </div>
+                      <span style={{ color: '#E2E8F0', fontSize: 11, fontWeight: 600, width: 32, textAlign: 'center' }}>
+                        {isNumber ? (stats.entries > 0 ? `${stats.entries}` : '0') : `${stats.pct}%`}
+                      </span>
+                      {stats.streak >= 2 ? (
+                        <span className="streak-badge">{'\u{1F525}'}{stats.streak}</span>
+                      ) : (
+                        <span style={{ width: 44 }}></span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── Metrics Dashboard ────────────────────────────────────────
+function MetricsDashboard({ config, metrics, daysInMonth }) {
+  const numberHabits = config.categories.flatMap(c =>
+    c.habits.filter(h => h.type === 'number').map(h => ({ ...h, catColor: c.color, catName: c.name }))
+  );
+
+  if (numberHabits.length === 0) return null;
+
+  const metricStats = numberHabits.map(h => {
+    const values = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      const val = metrics[cellKey(h.id, d)];
+      if (val !== undefined && val !== '') {
+        values.push({ day: d, value: typeof val === 'number' ? val : parseFloat(val) });
+      }
+    }
+    const nums = values.map(v => v.value).filter(v => !isNaN(v));
+    const sum = nums.reduce((a, b) => a + b, 0);
+    const avg = nums.length > 0 ? sum / nums.length : 0;
+    const min = nums.length > 0 ? Math.min(...nums) : 0;
+    const max = nums.length > 0 ? Math.max(...nums) : 0;
+    const first = nums.length > 0 ? nums[0] : null;
+    const last = nums.length > 0 ? nums[nums.length - 1] : null;
+    const trend = first !== null && last !== null ? last - first : 0;
+    return { ...h, values, sum, avg, min, max, trend, entries: nums.length };
+  });
+
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Metrics Dashboard</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
+        {metricStats.map(m => (
+          <div key={m.id} style={{ background: '#252B45', borderRadius: 10, padding: 16, borderTop: `3px solid ${m.catColor}` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div>
+                <div style={{ color: '#E2E8F0', fontSize: 15, fontWeight: 600 }}>{m.name}</div>
+                <div style={{ color: '#94A3B8', fontSize: 11 }}>{m.catName} &middot; {m.unit}</div>
+              </div>
+              {m.entries > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span style={{ color: m.direction === 'down' ? (m.trend <= 0 ? '#00B894' : '#E94560') : (m.trend >= 0 ? '#00B894' : '#E94560'), fontSize: 13, fontWeight: 700 }}>
+                    {m.trend > 0 ? '+' : ''}{m.trend.toFixed(1)}
+                  </span>
+                  <span style={{ fontSize: 11, color: '#94A3B8' }}>{m.unit}</span>
+                </div>
+              )}
+            </div>
+            {m.entries > 0 ? (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+                  {m.goal ? (
+                    <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>TOTAL</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.sum.toFixed(0)}<span style={{ color: '#94A3B8', fontSize: 11 }}>/{m.goal}</span></div></div>
+                  ) : (
+                    <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>LATEST</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.values[m.values.length - 1].value.toFixed(1)}</div></div>
+                  )}
+                  <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>AVG</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.avg.toFixed(1)}</div></div>
+                  <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>ENTRIES</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.entries}</div></div>
+                </div>
+                {/* Mini sparkline */}
+                {m.values.length >= 2 && (
+                  <ResponsiveContainer width="100%" height={50}>
+                    <LineChart data={m.values} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                      <Line type="monotone" dataKey="value" stroke={m.catColor} strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            ) : (
+              <div style={{ color: '#94A3B8', fontSize: 12, fontStyle: 'italic' }}>No entries yet</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Weekly Summary ───────────────────────────────────────────
+function WeeklySummary({ weeklyData }) {
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Weekly Summary</h2>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={weeklyData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+          <XAxis dataKey="week" stroke="#94A3B8" fontSize={12} tickLine={false} />
+          <YAxis stroke="#94A3B8" fontSize={12} tickLine={false} domain={[0, 100]} tickFormatter={v => `${v}%`} />
+          <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #252B45', borderRadius: 8, color: '#E2E8F0' }} formatter={v => [`${v}%`, 'Avg Completion']} />
+          <Bar dataKey="pct" radius={[4, 4, 0, 0]}>
+            {weeklyData.map((entry, idx) => (
+              <Cell key={idx} fill={entry.pct >= 80 ? '#00B894' : entry.pct >= 50 ? '#FFD700' : '#E94560'} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+// ─── Leaderboard ──────────────────────────────────────────────
+function Leaderboard({ config, habitStats }) {
+  const allHabits = flattenHabits(config).filter(h => h.type === 'boolean');
+  const sorted = allHabits
+    .map(h => ({ ...h, ...(habitStats[h.id] || { done: 0, pct: 0 }) }))
+    .sort((a, b) => b.pct - a.pct);
+
+  if (sorted.length === 0) return null;
+
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Leaderboard</h2>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {sorted.map((h, idx) => (
+          <div key={h.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderRadius: 8, background: idx < 3 ? '#252B4540' : 'transparent' }}>
+            <span style={{ color: '#94A3B8', fontSize: 13, fontWeight: 600, width: 24 }}>#{idx + 1}</span>
+            <span style={{ width: 10, height: 10, borderRadius: '50%', background: h.categoryColor, flexShrink: 0 }} />
+            <span style={{ color: '#E2E8F0', fontSize: 13, flex: 1 }}>{h.name}</span>
+            <div style={{ width: 80, height: 6, background: '#252B45', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ height: '100%', borderRadius: 3, background: h.categoryColor, width: `${h.pct}%`, transition: 'width 300ms ease' }} />
+            </div>
+            <span style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 600, width: 40, textAlign: 'right' }}>{h.pct}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Notes ────────────────────────────────────────────────────
+function Notes({ notes, setNotes }) {
+  return (
+    <div style={{ background: '#1A1F35', borderRadius: 12, padding: 24, marginBottom: 24 }}>
+      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Weekly Reflections</h2>
+      <textarea
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+        placeholder="What went well this week? What can you improve?"
+        style={{ width: '100%', minHeight: 120, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, padding: 16, fontSize: 14, lineHeight: 1.6, resize: 'vertical', outline: 'none', fontFamily: 'inherit' }}
+        onFocus={e => e.target.style.borderColor = '#3B82F6'}
+        onBlur={e => e.target.style.borderColor = '#374151'}
+      />
+    </div>
+  );
+}
+
+// ─── Settings Panel ───────────────────────────────────────────
+function SettingsPanel({ isOpen, onClose, config, setConfig, user, onSignOut }) {
+  const [editingCat, setEditingCat] = useState(null);
+  const [editingHabit, setEditingHabit] = useState(null);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatColor, setNewCatColor] = useState('#3B82F6');
+  const [importText, setImportText] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+
+  const addCategory = () => {
+    if (!newCatName.trim()) return;
+    const updated = { ...config, categories: [...config.categories, { id: uuid(), name: newCatName.trim(), color: newCatColor, habits: [] }] };
+    setConfig(updated);
+    setNewCatName('');
+  };
+
+  const updateCategory = (catId, field, value) => {
+    const updated = { ...config, categories: config.categories.map(c => c.id === catId ? { ...c, [field]: value } : c) };
+    setConfig(updated);
+  };
+
+  const deleteCategory = (catId) => {
+    const updated = { ...config, categories: config.categories.filter(c => c.id !== catId) };
+    setConfig(updated);
+  };
+
+  const moveCat = (catId, dir) => {
+    const idx = config.categories.findIndex(c => c.id === catId);
+    if ((dir === -1 && idx === 0) || (dir === 1 && idx === config.categories.length - 1)) return;
+    const cats = [...config.categories];
+    [cats[idx], cats[idx + dir]] = [cats[idx + dir], cats[idx]];
+    setConfig({ ...config, categories: cats });
+  };
+
+  const addHabit = (catId) => {
+    const updated = {
+      ...config,
+      categories: config.categories.map(c =>
+        c.id === catId ? { ...c, habits: [...c.habits, { id: uuid(), name: 'New Habit', type: 'boolean', goal: 30 }] } : c
+      ),
+    };
+    setConfig(updated);
+  };
+
+  const updateHabit = (catId, habitId, updates) => {
+    const updated = {
+      ...config,
+      categories: config.categories.map(c =>
+        c.id === catId ? { ...c, habits: c.habits.map(h => h.id === habitId ? { ...h, ...updates } : h) } : c
+      ),
+    };
+    setConfig(updated);
+  };
+
+  const deleteHabit = (catId, habitId) => {
+    const updated = {
+      ...config,
+      categories: config.categories.map(c =>
+        c.id === catId ? { ...c, habits: c.habits.filter(h => h.id !== habitId) } : c
+      ),
+    };
+    setConfig(updated);
+    if (editingHabit === habitId) setEditingHabit(null);
+  };
+
+  const moveHabit = (catId, habitId, dir) => {
+    const cat = config.categories.find(c => c.id === catId);
+    const idx = cat.habits.findIndex(h => h.id === habitId);
+    if ((dir === -1 && idx === 0) || (dir === 1 && idx === cat.habits.length - 1)) return;
+    const habits = [...cat.habits];
+    [habits[idx], habits[idx + dir]] = [habits[idx + dir], habits[idx]];
+    const updated = { ...config, categories: config.categories.map(c => c.id === catId ? { ...c, habits } : c) };
+    setConfig(updated);
+  };
+
+  const exportConfig = () => {
+    const json = JSON.stringify(config, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `daily-disciplines-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importConfig = () => {
+    try {
+      const parsed = JSON.parse(importText);
+      if (parsed.categories && Array.isArray(parsed.categories)) {
+        setConfig(parsed);
+        setImportText('');
+        setShowImport(false);
+      } else {
+        alert('Invalid config: must have a "categories" array');
+      }
+    } catch (e) {
+      alert('Invalid JSON: ' + e.message);
+    }
+  };
+
+  const resetDefaults = () => {
+    setConfig(JSON.parse(JSON.stringify(DEFAULT_CONFIG)));
+    setConfirmReset(false);
+  };
+
+  return (
+    <>
+      <div className={`settings-overlay ${isOpen ? 'open' : ''}`} onClick={onClose} />
+      <div className={`settings-drawer ${isOpen ? 'open' : ''}`}>
+        <div style={{ padding: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0' }}>Settings</h2>
+            <button onClick={onClose} className="btn btn-ghost" style={{ padding: '6px 12px' }}>{'\u2715'}</button>
+          </div>
+
+          {/* Categories */}
+          <div style={{ marginBottom: 32 }}>
+            <h3 style={{ color: '#94A3B8', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>Categories & Habits</h3>
+
+            {config.categories.map((cat, catIdx) => (
+              <div key={cat.id} style={{ background: '#252B45', borderRadius: 10, padding: 16, marginBottom: 12, borderLeft: `4px solid ${cat.color}` }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <input type="color" value={cat.color} onChange={e => updateCategory(cat.id, 'color', e.target.value)} style={{ width: 28, height: 28, border: 'none', borderRadius: 4, cursor: 'pointer', background: 'none' }} />
+                  {editingCat === cat.id ? (
+                    <input className="input" style={{ flex: 1 }} value={cat.name} onChange={e => updateCategory(cat.id, 'name', e.target.value)} onBlur={() => setEditingCat(null)} onKeyDown={e => e.key === 'Enter' && setEditingCat(null)} autoFocus />
+                  ) : (
+                    <span style={{ color: '#E2E8F0', fontSize: 15, fontWeight: 600, flex: 1, cursor: 'pointer' }} onClick={() => setEditingCat(cat.id)}>{cat.name}</span>
+                  )}
+                  <button onClick={() => moveCat(cat.id, -1)} className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} disabled={catIdx === 0}>{'\u25B2'}</button>
+                  <button onClick={() => moveCat(cat.id, 1)} className="btn btn-ghost" style={{ padding: '4px 8px', fontSize: 12 }} disabled={catIdx === config.categories.length - 1}>{'\u25BC'}</button>
+                  <button onClick={() => deleteCategory(cat.id)} className="btn btn-danger" style={{ padding: '4px 10px', fontSize: 12 }}>{'\u2715'}</button>
+                </div>
+
+                {/* Habits in this category */}
+                <div style={{ marginLeft: 8 }}>
+                  {cat.habits.map((habit, hIdx) => (
+                    <div key={habit.id} style={{ padding: '6px 0', borderBottom: '1px solid #374151' }}>
+                      {editingHabit === habit.id ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <input className="input" value={habit.name} onChange={e => updateHabit(cat.id, habit.id, { name: e.target.value })} placeholder="Habit name" />
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <select className="select" style={{ width: 'auto' }} value={habit.type} onChange={e => {
+                              const newType = e.target.value;
+                              const updates = { type: newType };
+                              if (newType === 'number') { updates.unit = habit.unit || 'units'; updates.direction = habit.direction || 'up'; }
+                              updateHabit(cat.id, habit.id, updates);
+                            }}>
+                              <option value="boolean">Checkbox</option>
+                              <option value="number">Number</option>
+                            </select>
+                            {habit.type === 'number' && (
+                              <>
+                                <input className="input" style={{ width: 80 }} value={habit.unit || ''} onChange={e => updateHabit(cat.id, habit.id, { unit: e.target.value })} placeholder="Unit" />
+                                <select className="select" style={{ width: 'auto' }} value={habit.direction || 'up'} onChange={e => updateHabit(cat.id, habit.id, { direction: e.target.value })}>
+                                  <option value="up">Higher is better</option>
+                                  <option value="down">Lower is better</option>
+                                </select>
+                              </>
+                            )}
+                            <input className="input" style={{ width: 70 }} type="number" value={habit.goal ?? ''} onChange={e => updateHabit(cat.id, habit.id, { goal: e.target.value === '' ? null : Number(e.target.value) })} placeholder="Goal" />
+                            <span style={{ color: '#94A3B8', fontSize: 11 }}>goal/mo</span>
+                          </div>
+                          <button onClick={() => setEditingHabit(null)} className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '4px 12px', fontSize: 12 }}>Done</button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ color: '#E2E8F0', fontSize: 13, flex: 1, cursor: 'pointer' }} onClick={() => setEditingHabit(habit.id)}>
+                            {habit.name}
+                            <span style={{ color: '#94A3B8', fontSize: 11, marginLeft: 6 }}>
+                              {habit.type === 'number' ? `${habit.unit || ''} \u2022 ${habit.direction || 'up'}` : 'checkbox'}
+                              {habit.goal ? ` \u2022 goal: ${habit.goal}` : ''}
+                            </span>
+                          </span>
+                          <button onClick={() => moveHabit(cat.id, habit.id, -1)} className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} disabled={hIdx === 0}>{'\u25B2'}</button>
+                          <button onClick={() => moveHabit(cat.id, habit.id, 1)} className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} disabled={hIdx === cat.habits.length - 1}>{'\u25BC'}</button>
+                          <button onClick={() => deleteHabit(cat.id, habit.id)} className="btn btn-danger" style={{ padding: '2px 8px', fontSize: 10 }}>{'\u2715'}</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <button onClick={() => addHabit(cat.id)} className="btn btn-ghost" style={{ marginTop: 8, padding: '4px 12px', fontSize: 12 }}>+ Add Habit</button>
+                </div>
+              </div>
+            ))}
+
+            {/* Add category */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              <input type="color" value={newCatColor} onChange={e => setNewCatColor(e.target.value)} style={{ width: 36, height: 36, border: 'none', borderRadius: 4, cursor: 'pointer', background: 'none' }} />
+              <input className="input" value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="New category name" onKeyDown={e => e.key === 'Enter' && addCategory()} />
+              <button onClick={addCategory} className="btn btn-primary">Add</button>
+            </div>
+          </div>
+
+          {/* Import / Export */}
+          <div style={{ marginBottom: 24 }}>
+            <h3 style={{ color: '#94A3B8', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>Backup & Restore</h3>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+              <button onClick={exportConfig} className="btn btn-ghost">Export Config</button>
+              <button onClick={() => setShowImport(!showImport)} className="btn btn-ghost">Import Config</button>
+            </div>
+            {showImport && (
+              <div style={{ marginTop: 8 }}>
+                <textarea className="input" style={{ minHeight: 100, resize: 'vertical', marginBottom: 8, fontFamily: 'monospace', fontSize: 12 }} value={importText} onChange={e => setImportText(e.target.value)} placeholder="Paste JSON config here..." />
+                <button onClick={importConfig} className="btn btn-primary">Apply Import</button>
+              </div>
+            )}
+          </div>
+
+          {/* Account */}
+          {user && (
+            <div style={{ marginBottom: 24 }}>
+              <h3 style={{ color: '#94A3B8', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>Account</h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#252B45', borderRadius: 10, padding: 16, marginBottom: 8 }}>
+                <img src={user.photoURL} alt="" style={{ width: 36, height: 36, borderRadius: '50%' }} referrerPolicy="no-referrer" />
+                <div style={{ flex: 1 }}>
+                  <div style={{ color: '#E2E8F0', fontSize: 14, fontWeight: 600 }}>{user.displayName}</div>
+                  <div style={{ color: '#94A3B8', fontSize: 12 }}>{user.email}</div>
+                </div>
+                <button onClick={onSignOut} className="btn btn-ghost" style={{ fontSize: 12 }}>Sign Out</button>
+              </div>
+              <p style={{ color: '#94A3B8', fontSize: 11 }}>Your data syncs to the cloud automatically when signed in.</p>
+            </div>
+          )}
+
+          {/* Reset */}
+          <div>
+            <h3 style={{ color: '#94A3B8', fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>Danger Zone</h3>
+            {!confirmReset ? (
+              <button onClick={() => setConfirmReset(true)} className="btn btn-danger">Reset to Defaults</button>
+            ) : (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span style={{ color: '#E94560', fontSize: 13 }}>Are you sure? This resets all categories/habits.</span>
+                <button onClick={resetDefaults} className="btn btn-danger">Yes, Reset</button>
+                <button onClick={() => setConfirmReset(false)} className="btn btn-ghost">Cancel</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────
+function App() {
+  const now = new Date();
+  const [month, setMonth] = useState(now.getMonth());
+  const [year, setYear] = useState(now.getFullYear());
+  const [config, setConfigState] = useState(() => loadConfig());
+  const [checks, setChecksState] = useState(() => loadChecks(now.getFullYear(), now.getMonth()));
+  const [metrics, setMetricsState] = useState(() => loadMetrics(now.getFullYear(), now.getMonth()));
+  const [notes, setNotesState] = useState(() => loadNotes(now.getFullYear(), now.getMonth()));
+  const [collapsed, setCollapsed] = useState(new Set());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('idle'); // idle | syncing | synced | error
+
+  const { user, loading: authLoading, signIn, signOut } = useAuth();
+  const prevUserRef = useRef(null);
+
+  const daysInMonth = useMemo(() => getDaysInMonth(month, year), [month, year]);
+  const allHabits = useMemo(() => flattenHabits(config), [config]);
+  const booleanHabits = useMemo(() => allHabits.filter(h => h.type !== 'number'), [allHabits]);
+
+  // ── Cloud sync on auth state change ──
+  useEffect(() => {
+    if (authLoading) return;
+    const wasNull = prevUserRef.current === null;
+    prevUserRef.current = user;
+
+    if (!user) {
+      setSyncStatus('idle');
+      return;
+    }
+
+    // User just signed in
+    (async () => {
+      setSyncStatus('syncing');
+      try {
+        // Check if cloud data exists
+        const cloudConfig = await loadConfigCloud(user.uid);
+        if (!cloudConfig) {
+          // First login: migrate local data to cloud
+          await migrateLocalToCloud(user.uid);
+        } else {
+          // Returning user: pull cloud data
+          const merged = { categories: cloudConfig.categories };
+          setConfigState(merged);
+          saveConfig(merged);
+
+          const cloudMonth = await loadMonthCloud(user.uid, year, month);
+          if (cloudMonth) {
+            if (cloudMonth.checks) { setChecksState(cloudMonth.checks); saveChecks(year, month, cloudMonth.checks); }
+            if (cloudMonth.metrics) { setMetricsState(cloudMonth.metrics); saveMetrics(year, month, cloudMonth.metrics); }
+            if (cloudMonth.notes !== undefined) { setNotesState(cloudMonth.notes); saveNotes(year, month, cloudMonth.notes); }
+          }
+        }
+        setSyncStatus('synced');
+      } catch (err) {
+        console.error('Cloud sync error:', err);
+        setSyncStatus('error');
+      }
+    })();
+  }, [user, authLoading]);
+
+  // Persist config (local + cloud)
+  const setConfig = useCallback((c) => {
+    setConfigState(c);
+    saveConfigCloud(c, user?.uid);
+    if (user) setSyncStatus('synced');
+  }, [user]);
+
+  // Load data when month/year changes
+  useEffect(() => {
+    setChecksState(loadChecks(year, month));
+    setMetricsState(loadMetrics(year, month));
+    setNotesState(loadNotes(year, month));
+
+    // Also fetch from cloud in background
+    if (user) {
+      (async () => {
+        setSyncStatus('syncing');
+        try {
+          const cloudMonth = await loadMonthCloud(user.uid, year, month);
+          if (cloudMonth) {
+            if (cloudMonth.checks) { setChecksState(cloudMonth.checks); saveChecks(year, month, cloudMonth.checks); }
+            if (cloudMonth.metrics) { setMetricsState(cloudMonth.metrics); saveMetrics(year, month, cloudMonth.metrics); }
+            if (cloudMonth.notes !== undefined) { setNotesState(cloudMonth.notes); saveNotes(year, month, cloudMonth.notes); }
+          }
+          setSyncStatus('synced');
+        } catch (err) {
+          console.error('Cloud load error:', err);
+          setSyncStatus('error');
+        }
+      })();
+    }
+  }, [month, year]);
+
+  // Debounced cloud save helper
+  const cloudSaveTimeout = useRef(null);
+  const scheduleCloudSave = useCallback((checksVal, metricsVal, notesVal) => {
+    if (!user) return;
+    clearTimeout(cloudSaveTimeout.current);
+    cloudSaveTimeout.current = setTimeout(() => {
+      saveMonthCloud(year, month, checksVal, metricsVal, notesVal, user.uid);
+      setSyncStatus('synced');
+    }, 1000);
+    setSyncStatus('syncing');
+  }, [user, year, month]);
+
+  // Persist checks (local immediately, cloud debounced)
+  const setChecks = useCallback((updater) => {
+    setChecksState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveChecks(year, month, next);
+      // Read current metrics/notes for cloud save
+      scheduleCloudSave(next, loadMetrics(year, month), loadNotes(year, month));
+      return next;
+    });
+  }, [year, month, scheduleCloudSave]);
+
+  // Persist metrics (local immediately, cloud debounced)
+  const setMetrics = useCallback((updater) => {
+    setMetricsState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveMetrics(year, month, next);
+      scheduleCloudSave(loadChecks(year, month), next, loadNotes(year, month));
+      return next;
+    });
+  }, [year, month, scheduleCloudSave]);
+
+  // Persist notes (local immediately, cloud debounced)
+  const setNotes = useCallback((val) => {
+    setNotesState(val);
+    saveNotes(year, month, val);
+    scheduleCloudSave(loadChecks(year, month), loadMetrics(year, month), val);
+  }, [year, month, scheduleCloudSave]);
+
+  const toggleCheck = useCallback((key) => {
+    setChecks(prev => ({ ...prev, [key]: !prev[key] }));
+  }, [setChecks]);
+
+  const setMetric = useCallback((key, value) => {
+    setMetrics(prev => {
+      const next = { ...prev };
+      if (value === undefined) { delete next[key]; } else { next[key] = value; }
+      return next;
+    });
+  }, [setMetrics]);
+
+  const toggleCollapse = useCallback((catId) => {
+    setCollapsed(prev => {
+      const next = new Set(prev);
+      if (next.has(catId)) next.delete(catId); else next.add(catId);
+      return next;
+    });
+  }, []);
+
+  // ── Per-habit stats ──
+  const habitStats = useMemo(() => {
+    const stats = {};
+    allHabits.forEach(h => {
+      if (h.type === 'number') {
+        let sum = 0; let entries = 0; let streak = 0; let maxStreak = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          const val = metrics[cellKey(h.id, d)];
+          if (val !== undefined && val !== '') {
+            const num = typeof val === 'number' ? val : parseFloat(val);
+            if (!isNaN(num)) { sum += num; entries++; streak++; if (streak > maxStreak) maxStreak = streak; }
+            else { streak = 0; }
+          } else { streak = 0; }
+        }
+        const goal = h.goal;
+        const pct = goal ? Math.round((sum / goal) * 100) : (entries > 0 ? 100 : 0);
+        stats[h.id] = { done: entries, pct: Math.min(pct, 100), remaining: goal ? Math.max(0, goal - sum) : 0, streak: maxStreak, sum, avg: entries > 0 ? sum / entries : 0, entries };
+      } else {
+        let done = 0; let streak = 0; let maxStreak = 0;
+        for (let d = 1; d <= daysInMonth; d++) {
+          if (checks[cellKey(h.id, d)]) { done++; streak++; if (streak > maxStreak) maxStreak = streak; }
+          else { streak = 0; }
+        }
+        const goal = h.goal && h.goal <= daysInMonth ? h.goal : daysInMonth;
+        const pct = goal > 0 ? Math.round((done / goal) * 100) : 0;
+        stats[h.id] = { done, pct: Math.min(pct, 100), remaining: Math.max(0, goal - done), streak: maxStreak, goal };
+      }
+    });
+    return stats;
+  }, [allHabits, checks, metrics, daysInMonth]);
+
+  // ── Daily stats (boolean habits only) ──
+  const dailyData = useMemo(() => {
+    const data = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      let count = 0;
+      booleanHabits.forEach(h => { if (checks[cellKey(h.id, d)]) count++; });
+      data.push({ day: d, pct: booleanHabits.length > 0 ? Math.round((count / booleanHabits.length) * 100) : 0, count });
+    }
+    return data;
+  }, [booleanHabits, checks, daysInMonth]);
+
+  // ── Global stats ──
+  const { totalDone, totalPossible, overallPct, bestStreak, todayScore, todayTotal } = useMemo(() => {
+    let totalDone = 0, totalPossible = 0;
+    let bestStreak = { habit: '', count: 0 };
+
+    booleanHabits.forEach(h => {
+      const s = habitStats[h.id];
+      if (s) {
+        totalDone += s.done;
+        totalPossible += (s.goal || daysInMonth);
+        if (s.streak > bestStreak.count) bestStreak = { habit: h.name, count: s.streak };
+      }
+    });
+
+    const today = now.getDate();
+    let todayScore = 0;
+    booleanHabits.forEach(h => { if (checks[cellKey(h.id, today)]) todayScore++; });
+
+    return {
+      totalDone, totalPossible,
+      overallPct: totalPossible > 0 ? Math.round((totalDone / totalPossible) * 100) : 0,
+      bestStreak, todayScore, todayTotal: booleanHabits.length,
+    };
+  }, [booleanHabits, habitStats, checks, daysInMonth]);
+
+  // ── Weekly summaries ──
+  const weeklyData = useMemo(() => {
+    const weeks = [];
+    let weekNum = 1;
+    for (let start = 1; start <= daysInMonth; start += 7) {
+      const end = Math.min(start + 6, daysInMonth);
+      let done = 0, possible = 0;
+      for (let d = start; d <= end; d++) {
+        booleanHabits.forEach(h => { possible++; if (checks[cellKey(h.id, d)]) done++; });
+      }
+      weeks.push({ week: `Wk ${weekNum}`, pct: possible > 0 ? Math.round((done / possible) * 100) : 0, days: `${start}-${end}` });
+      weekNum++;
+    }
+    return weeks;
+  }, [booleanHabits, checks, daysInMonth]);
+
+  return (
+    <div style={{ maxWidth: 1400, margin: '0 auto', padding: '24px 16px' }}>
+      <Header month={month} year={year} setMonth={setMonth} setYear={setYear} overallPct={overallPct} onOpenSettings={() => setSettingsOpen(true)} user={user} onSignIn={signIn} syncStatus={syncStatus} />
+      <DashboardCards totalDone={totalDone} totalPossible={totalPossible} bestStreak={bestStreak} todayScore={todayScore} todayTotal={todayTotal} />
+      <DailyChart dailyData={dailyData} />
+      <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} />
+      <MetricsDashboard config={config} metrics={metrics} daysInMonth={daysInMonth} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', gap: 24 }}>
+        <WeeklySummary weeklyData={weeklyData} />
+        <Notes notes={notes} setNotes={setNotes} />
+      </div>
+      <Leaderboard config={config} habitStats={habitStats} />
+      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} config={config} setConfig={setConfig} user={user} onSignOut={signOut} />
+      <div style={{ textAlign: 'center', padding: '24px 0', color: '#94A3B8', fontSize: 12 }}>
+        Daily Disciplines v2 — Built for consistency, not perfection.
+      </div>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+  </script>
+</body>
+</html>
