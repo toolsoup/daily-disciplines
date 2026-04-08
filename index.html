@@ -208,6 +208,16 @@ function saveGoals(year, month, data) {
   saveJSON(`dd-goals-${monthKey(year, month)}`, data);
 }
 
+// Wipe all per-user local data (called on sign-out / user switch)
+function clearLocalUserData() {
+  const keysToRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('dd-') && key !== 'dd-last-uid') keysToRemove.push(key);
+  }
+  keysToRemove.forEach(k => localStorage.removeItem(k));
+}
+
 // ─── useAuth Hook ────────────────────────────────────────────
 function useAuth() {
   const [user, setUser] = useState(null);
@@ -1432,13 +1442,30 @@ function App() {
   // ── Cloud sync on auth state change ──
   useEffect(() => {
     if (authLoading) return;
-    const wasNull = prevUserRef.current === null;
+    const prevUser = prevUserRef.current;
     prevUserRef.current = user;
 
     if (!user) {
+      // Signed out: wipe local data and reset in-memory state to defaults
+      clearLocalUserData();
+      localStorage.removeItem('dd-last-uid');
+      const freshConfig = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+      setConfigState(freshConfig);
+      setChecksState({});
+      setMetricsState({});
+      setNotesState('');
+      setJournalState([]);
+      setGoalsState(defaultGoals());
       setSyncStatus('idle');
       return;
     }
+
+    // If switching accounts on the same browser, wipe the previous user's local cache first
+    const lastUid = localStorage.getItem('dd-last-uid');
+    if (lastUid && lastUid !== user.uid) {
+      clearLocalUserData();
+    }
+    localStorage.setItem('dd-last-uid', user.uid);
 
     // User just signed in
     (async () => {
