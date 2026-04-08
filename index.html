@@ -971,77 +971,135 @@ function GoalsPanel({ goals, setGoals }) {
 }
 
 // ─── Metrics Dashboard ────────────────────────────────────────
-function MetricsDashboard({ config, metrics, daysInMonth }) {
+function build30DayMetricSeries(habitId) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Pre-load all month buckets we'll need (current 30-day window + ~30 days back for seeding)
+  const bucketCache = {};
+  const getBucket = (y, m) => {
+    const k = `${y}-${m}`;
+    if (!(k in bucketCache)) bucketCache[k] = loadMetrics(y, m);
+    return bucketCache[k];
+  };
+  const readDay = (d) => {
+    const bucket = getBucket(d.getFullYear(), d.getMonth());
+    const raw = bucket[cellKey(habitId, d.getDate())];
+    if (raw === undefined || raw === '') return NaN;
+    return typeof raw === 'number' ? raw : parseFloat(raw);
+  };
+
+  // Seed: scan up to 60 days before the window for the most recent prior value
+  let lastVal = null;
+  for (let i = 30; i <= 90; i++) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const num = readDay(d);
+    if (!isNaN(num)) { lastVal = num; break; }
+  }
+
+  // Walk the 30-day window forward
+  const series = [];
+  let entriesInWindow = 0;
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today); d.setDate(today.getDate() - i);
+    const num = readDay(d);
+    if (!isNaN(num)) { lastVal = num; entriesInWindow++; }
+    series.push({
+      label: `${d.getMonth() + 1}/${d.getDate()}`,
+      fullLabel: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+      value: lastVal,
+      hasEntry: !isNaN(num),
+    });
+  }
+
+  // 7-day rolling average over carried-forward values (skipping nulls)
+  for (let i = 0; i < series.length; i++) {
+    let sum = 0, count = 0;
+    for (let j = Math.max(0, i - 6); j <= i; j++) {
+      if (series[j].value !== null && !isNaN(series[j].value)) { sum += series[j].value; count++; }
+    }
+    series[i].avg7 = count > 0 ? +(sum / count).toFixed(2) : null;
+  }
+
+  return { series, entriesInWindow };
+}
+
+function MetricsDashboard({ config, metrics }) {
+  const isMobile = useIsMobile();
   const numberHabits = config.categories.flatMap(c =>
     c.habits.filter(h => h.type === 'number').map(h => ({ ...h, catColor: c.color, catName: c.name }))
   );
 
+  // metrics prop is included so React re-renders this component when entries change.
+  const metricSeries = useMemo(
+    () => numberHabits.map(h => ({ ...h, ...build30DayMetricSeries(h.id) })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [numberHabits.map(h => h.id).join(','), metrics]
+  );
+
   if (numberHabits.length === 0) return null;
 
-  const metricStats = numberHabits.map(h => {
-    const values = [];
-    for (let d = 1; d <= daysInMonth; d++) {
-      const val = metrics[cellKey(h.id, d)];
-      if (val !== undefined && val !== '') {
-        values.push({ day: d, value: typeof val === 'number' ? val : parseFloat(val) });
-      }
-    }
-    const nums = values.map(v => v.value).filter(v => !isNaN(v));
-    const sum = nums.reduce((a, b) => a + b, 0);
-    const avg = nums.length > 0 ? sum / nums.length : 0;
-    const min = nums.length > 0 ? Math.min(...nums) : 0;
-    const max = nums.length > 0 ? Math.max(...nums) : 0;
-    const first = nums.length > 0 ? nums[0] : null;
-    const last = nums.length > 0 ? nums[nums.length - 1] : null;
-    const trend = first !== null && last !== null ? last - first : 0;
-    return { ...h, values, sum, avg, min, max, trend, entries: nums.length };
-  });
-
   return (
-    <div className="dashboard-card" style={{ padding: 24, marginBottom: 24 }}>
-      <h2 style={{ fontSize: 18, fontWeight: 600, color: '#E2E8F0', marginBottom: 16 }}>Metrics Dashboard</h2>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 16 }}>
-        {metricStats.map(m => (
-          <div key={m.id} style={{ background: '#252B45', borderRadius: 10, padding: 16, borderTop: `3px solid ${m.catColor}` }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-              <div>
-                <div style={{ color: '#E2E8F0', fontSize: 15, fontWeight: 600 }}>{m.name}</div>
-                <div style={{ color: '#94A3B8', fontSize: 11 }}>{m.catName} &middot; {m.unit}</div>
-              </div>
-              {m.entries > 0 && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span style={{ color: m.direction === 'down' ? (m.trend <= 0 ? '#00B894' : '#E94560') : (m.trend >= 0 ? '#00B894' : '#E94560'), fontSize: 13, fontWeight: 700 }}>
-                    {m.trend > 0 ? '+' : ''}{m.trend.toFixed(1)}
-                  </span>
-                  <span style={{ fontSize: 11, color: '#94A3B8' }}>{m.unit}</span>
+    <div className="dashboard-card" style={{ padding: isMobile ? 12 : 24, marginBottom: isMobile ? 12 : 24 }}>
+      <h2 style={{ fontSize: isMobile ? 15 : 18, fontWeight: 600, color: '#E2E8F0', marginBottom: isMobile ? 8 : 16 }}>Metrics Dashboard</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16 }}>
+        {metricSeries.map(m => {
+          const firstVal = m.series.find(p => p.value !== null && !isNaN(p.value))?.value ?? null;
+          const lastVal = [...m.series].reverse().find(p => p.value !== null && !isNaN(p.value))?.value ?? null;
+          const trend = firstVal !== null && lastVal !== null ? lastVal - firstVal : 0;
+          const trendColor = m.direction === 'down'
+            ? (trend <= 0 ? '#00B894' : '#E94560')
+            : (trend >= 0 ? '#00B894' : '#E94560');
+          return (
+            <div key={m.id} style={{ background: '#252B45', borderRadius: 10, padding: 16, borderTop: `3px solid ${m.catColor}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div>
+                  <div style={{ color: '#E2E8F0', fontSize: 15, fontWeight: 600 }}>{m.name}</div>
+                  <div style={{ color: '#94A3B8', fontSize: 11 }}>{m.catName} &middot; {m.unit}</div>
                 </div>
-              )}
-            </div>
-            {m.entries > 0 ? (
-              <div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
-                  {m.goal ? (
-                    <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>TOTAL</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.sum.toFixed(0)}<span style={{ color: '#94A3B8', fontSize: 11 }}>/{m.goal}</span></div></div>
-                  ) : (
-                    <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>LATEST</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.values[m.values.length - 1].value.toFixed(1)}</div></div>
-                  )}
-                  <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>AVG</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.avg.toFixed(1)}</div></div>
-                  <div><div style={{ color: '#94A3B8', fontSize: 10, marginBottom: 2 }}>ENTRIES</div><div style={{ color: '#E2E8F0', fontSize: 16, fontWeight: 700 }}>{m.entries}</div></div>
-                </div>
-                {/* Mini sparkline */}
-                {m.values.length >= 2 && (
-                  <ResponsiveContainer width="100%" height={50}>
-                    <LineChart data={m.values} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-                      <Line type="monotone" dataKey="value" stroke={m.catColor} strokeWidth={2} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
+                {m.entriesInWindow > 0 && lastVal !== null && (
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                    <span style={{ color: '#E2E8F0', fontSize: 18, fontWeight: 700 }}>{lastVal.toFixed(1)}</span>
+                    <span style={{ color: trendColor, fontSize: 12, fontWeight: 700 }}>
+                      {trend > 0 ? '+' : ''}{trend.toFixed(1)}
+                    </span>
+                    <span style={{ fontSize: 11, color: '#94A3B8' }}>{m.unit}</span>
+                  </div>
                 )}
               </div>
-            ) : (
-              <div style={{ color: '#94A3B8', fontSize: 12, fontStyle: 'italic' }}>No entries yet</div>
-            )}
-          </div>
-        ))}
+              {m.entriesInWindow > 0 || firstVal !== null ? (
+                <>
+                  <ResponsiveContainer width="100%" height={isMobile ? 140 : 180}>
+                    <LineChart data={m.series} margin={{ top: 5, right: 12, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+                      <XAxis dataKey="label" stroke="#94A3B8" fontSize={11} tickLine={false} interval={4} />
+                      <YAxis stroke="#94A3B8" fontSize={11} tickLine={false} domain={['auto', 'auto']} tickFormatter={v => Number(v).toFixed(1)} width={42} />
+                      <Tooltip
+                        contentStyle={{ background: '#1A1F35', border: '1px solid #252B45', borderRadius: 8, color: '#E2E8F0' }}
+                        labelFormatter={(_, payload) => payload && payload[0] ? payload[0].payload.fullLabel : ''}
+                        formatter={(v, name) => [v == null ? '—' : `${Number(v).toFixed(1)} ${m.unit}`, name === 'value' ? 'Daily' : '7-day avg']}
+                      />
+                      <Line type="monotone" dataKey="value" stroke={m.catColor} strokeWidth={2} dot={false} connectNulls />
+                      <Line type="monotone" dataKey="avg7" stroke={m.catColor} strokeWidth={2} strokeDasharray="4 4" strokeOpacity={0.6} dot={false} connectNulls />
+                    </LineChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 11, color: '#94A3B8' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 14, height: 2, background: m.catColor, display: 'inline-block' }} />
+                      Daily
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ width: 14, height: 2, background: m.catColor, opacity: 0.6, borderTop: `2px dashed ${m.catColor}`, display: 'inline-block' }} />
+                      7-day avg
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div style={{ color: '#94A3B8', fontSize: 12, fontStyle: 'italic' }}>No entries yet</div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1718,7 +1776,7 @@ function App() {
       <DailyChart dailyData={dailyData} />
       <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} month={month} year={year} />
       <GoalsPanel goals={goals} setGoals={setGoals} />
-      <MetricsDashboard config={config} metrics={metrics} daysInMonth={daysInMonth} />
+      <MetricsDashboard config={config} metrics={metrics} />
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(400px, 1fr))', gap: isMobile ? 12 : 24 }}>
         <WeeklySummary weeklyData={weeklyData} />
         <Journal journal={journal} setJournal={setJournal} />
