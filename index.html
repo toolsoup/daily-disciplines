@@ -1079,7 +1079,7 @@ function MetricsDashboard({ config, metrics }) {
                         labelFormatter={(_, payload) => payload && payload[0] ? payload[0].payload.fullLabel : ''}
                         formatter={(v, name) => [v == null ? '—' : `${Number(v).toFixed(1)} ${m.unit}`, name === 'value' ? 'Daily' : '7-day avg']}
                       />
-                      <Line type="monotone" dataKey="value" stroke={m.catColor} strokeWidth={2} dot={false} connectNulls />
+                      <Line type="monotone" dataKey="value" stroke={m.catColor} strokeWidth={2} dot={(props) => props.payload.hasEntry ? <circle cx={props.cx} cy={props.cy} r={3} fill={m.catColor} /> : <g />} activeDot={{ r: 5, fill: m.catColor }} connectNulls />
                       <Line type="monotone" dataKey="avg7" stroke={m.catColor} strokeWidth={2} strokeDasharray="4 4" strokeOpacity={0.6} dot={false} connectNulls />
                     </LineChart>
                   </ResponsiveContainer>
