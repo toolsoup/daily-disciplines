@@ -1243,11 +1243,9 @@ function MetricCard({ habit, metrics }) {
               <span style={{ width: 14, height: 2, background: habit.catColor, opacity: 0.6, borderTop: `2px dashed ${habit.catColor}`, display: 'inline-block' }} />
               7-day avg
             </span>
-            {canScroll && (
-              <span style={{ marginLeft: 'auto', fontSize: 10, color: '#64748B', fontStyle: 'italic' }}>
-                ← drag to scroll history ({totalDays} days)
-              </span>
-            )}
+            <span style={{ marginLeft: 'auto', fontSize: 10, color: '#64748B', fontStyle: 'italic' }}>
+              {canScroll ? `← drag to scroll history · ${totalDays} days total` : `${totalDays} day${totalDays === 1 ? '' : 's'} total`}
+            </span>
           </div>
         </>
       )}
