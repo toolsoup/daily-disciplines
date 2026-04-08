@@ -185,6 +185,29 @@ function saveNotes(year, month, data) {
   saveJSON(`dd-notes-${monthKey(year, month)}`, data);
 }
 
+function defaultGoals() {
+  return {
+    monthly: [
+      { id: 1, text: '', done: false },
+      { id: 2, text: '', done: false },
+      { id: 3, text: '', done: false },
+    ],
+    weekly: [
+      { id: 1, text: '', done: false },
+      { id: 2, text: '', done: false },
+      { id: 3, text: '', done: false },
+    ],
+  };
+}
+
+function loadGoals(year, month) {
+  return loadJSON(`dd-goals-${monthKey(year, month)}`, defaultGoals());
+}
+
+function saveGoals(year, month, data) {
+  saveJSON(`dd-goals-${monthKey(year, month)}`, data);
+}
+
 // ─── useAuth Hook ────────────────────────────────────────────
 function useAuth() {
   const [user, setUser] = useState(null);
@@ -235,15 +258,17 @@ async function saveConfigCloud(config, uid) {
   } catch (err) { console.error('Cloud config save error:', err); }
 }
 
-async function saveMonthCloud(year, month, checks, metrics, notes, uid, journal) {
+async function saveMonthCloud(year, month, checks, metrics, notes, uid, journal, goals) {
   saveChecks(year, month, checks);
   saveMetrics(year, month, metrics);
   saveNotes(year, month, notes);
   if (journal !== undefined) saveJournal(year, month, journal);
+  if (goals !== undefined) saveGoals(year, month, goals);
   if (!uid) return;
   try {
     const data = { checks, metrics, notes };
     if (journal !== undefined) data.journal = journal;
+    if (goals !== undefined) data.goals = goals;
     await firestoreMonthRef(uid, year, month).set(data, { merge: true });
   } catch (err) { console.error('Cloud month save error:', err); }
 }
@@ -278,9 +303,10 @@ async function migrateLocalToCloud(uid) {
     const metricsMatch = key.match(/^dd-metrics-(\d{4})-(\d{2})$/);
     const notesMatch = key.match(/^dd-notes-(\d{4})-(\d{2})$/);
     const journalMatch = key.match(/^dd-journal-(\d{4})-(\d{2})$/);
+    const goalsMatch = key.match(/^dd-goals-(\d{4})-(\d{2})$/);
 
-    if (checksMatch || metricsMatch || notesMatch || journalMatch) {
-      const match = checksMatch || metricsMatch || notesMatch || journalMatch;
+    if (checksMatch || metricsMatch || notesMatch || journalMatch || goalsMatch) {
+      const match = checksMatch || metricsMatch || notesMatch || journalMatch || goalsMatch;
       const mk = `${match[1]}-${match[2]}`;
       const ref = db.collection('users').doc(uid).collection('months').doc(mk);
       const data = {};
@@ -288,10 +314,12 @@ async function migrateLocalToCloud(uid) {
       const metricsKey = `dd-metrics-${mk}`;
       const notesKey = `dd-notes-${mk}`;
       const journalKey = `dd-journal-${mk}`;
+      const goalsKey = `dd-goals-${mk}`;
       if (localStorage.getItem(checksKey)) data.checks = JSON.parse(localStorage.getItem(checksKey));
       if (localStorage.getItem(metricsKey)) data.metrics = JSON.parse(localStorage.getItem(metricsKey));
       if (localStorage.getItem(notesKey)) data.notes = JSON.parse(localStorage.getItem(notesKey));
       if (localStorage.getItem(journalKey)) data.journal = JSON.parse(localStorage.getItem(journalKey));
+      if (localStorage.getItem(goalsKey)) data.goals = JSON.parse(localStorage.getItem(goalsKey));
       if (Object.keys(data).length > 0) {
         await ref.set(data, { merge: true });
       }
@@ -846,38 +874,8 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
 }
 
 // ─── Monthly & Weekly Goals ──────────────────────────────────
-function GoalsPanel({ month, year }) {
-  const storageKey = `dd-goals-${monthKey(year, month)}`;
-  const [goals, setGoals] = useState(() => loadJSON(storageKey, {
-    monthly: [
-      { id: 1, text: '', done: false },
-      { id: 2, text: '', done: false },
-      { id: 3, text: '', done: false },
-    ],
-    weekly: [
-      { id: 1, text: '', done: false },
-      { id: 2, text: '', done: false },
-      { id: 3, text: '', done: false },
-    ],
-  }));
-
-  // Reload when month changes
-  useEffect(() => {
-    setGoals(loadJSON(storageKey, {
-      monthly: [
-        { id: 1, text: '', done: false },
-        { id: 2, text: '', done: false },
-        { id: 3, text: '', done: false },
-      ],
-      weekly: [
-        { id: 1, text: '', done: false },
-        { id: 2, text: '', done: false },
-        { id: 3, text: '', done: false },
-      ],
-    }));
-  }, [storageKey]);
-
-  const save = (updated) => { setGoals(updated); saveJSON(storageKey, updated); };
+function GoalsPanel({ goals, setGoals }) {
+  const save = (updated) => { setGoals(updated); };
 
   const updateGoal = (type, id, field, value) => {
     const updated = { ...goals, [type]: goals[type].map(g => g.id === id ? { ...g, [field]: value } : g) };
@@ -1419,6 +1417,7 @@ function App() {
     }
     return j;
   });
+  const [goals, setGoalsState] = useState(() => loadGoals(now.getFullYear(), now.getMonth()));
   const [collapsed, setCollapsed] = useState(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // idle | syncing | synced | error
@@ -1462,6 +1461,7 @@ function App() {
             if (cloudMonth.metrics) { setMetricsState(cloudMonth.metrics); saveMetrics(year, month, cloudMonth.metrics); }
             if (cloudMonth.notes !== undefined) { setNotesState(cloudMonth.notes); saveNotes(year, month, cloudMonth.notes); }
             if (cloudMonth.journal) { setJournalState(cloudMonth.journal); saveJournal(year, month, cloudMonth.journal); }
+            if (cloudMonth.goals) { setGoalsState(cloudMonth.goals); saveGoals(year, month, cloudMonth.goals); }
           }
         }
         setSyncStatus('synced');
@@ -1484,6 +1484,7 @@ function App() {
     setChecksState(loadChecks(year, month));
     setMetricsState(loadMetrics(year, month));
     setNotesState(loadNotes(year, month));
+    setGoalsState(loadGoals(year, month));
     const j = loadJournal(year, month);
     if (j.length === 0) {
       const oldNotes = loadNotes(year, month);
@@ -1509,6 +1510,7 @@ function App() {
             if (cloudMonth.metrics) { setMetricsState(cloudMonth.metrics); saveMetrics(year, month, cloudMonth.metrics); }
             if (cloudMonth.notes !== undefined) { setNotesState(cloudMonth.notes); saveNotes(year, month, cloudMonth.notes); }
             if (cloudMonth.journal) { setJournalState(cloudMonth.journal); saveJournal(year, month, cloudMonth.journal); }
+            if (cloudMonth.goals) { setGoalsState(cloudMonth.goals); saveGoals(year, month, cloudMonth.goals); }
           }
           setSyncStatus('synced');
         } catch (err) {
@@ -1521,11 +1523,11 @@ function App() {
 
   // Debounced cloud save helper
   const cloudSaveTimeout = useRef(null);
-  const scheduleCloudSave = useCallback((checksVal, metricsVal, notesVal, journalVal) => {
+  const scheduleCloudSave = useCallback((checksVal, metricsVal, notesVal, journalVal, goalsVal) => {
     if (!user) return;
     clearTimeout(cloudSaveTimeout.current);
     cloudSaveTimeout.current = setTimeout(() => {
-      saveMonthCloud(year, month, checksVal, metricsVal, notesVal, user.uid, journalVal);
+      saveMonthCloud(year, month, checksVal, metricsVal, notesVal, user.uid, journalVal, goalsVal);
       setSyncStatus('synced');
     }, 1000);
     setSyncStatus('syncing');
@@ -1564,7 +1566,17 @@ function App() {
     setJournalState(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       saveJournal(year, month, next);
-      scheduleCloudSave(loadChecks(year, month), loadMetrics(year, month), loadNotes(year, month), next);
+      scheduleCloudSave(loadChecks(year, month), loadMetrics(year, month), loadNotes(year, month), next, loadGoals(year, month));
+      return next;
+    });
+  }, [year, month, scheduleCloudSave]);
+
+  // Persist goals (local immediately, cloud debounced)
+  const setGoals = useCallback((updater) => {
+    setGoalsState(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      saveGoals(year, month, next);
+      scheduleCloudSave(loadChecks(year, month), loadMetrics(year, month), loadNotes(year, month), loadJournal(year, month), next);
       return next;
     });
   }, [year, month, scheduleCloudSave]);
@@ -1678,7 +1690,7 @@ function App() {
       <DashboardCards totalDone={totalDone} totalPossible={totalPossible} bestStreak={bestStreak} todayScore={todayScore} todayTotal={todayTotal} />
       <DailyChart dailyData={dailyData} />
       <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} month={month} year={year} />
-      <GoalsPanel month={month} year={year} />
+      <GoalsPanel goals={goals} setGoals={setGoals} />
       <MetricsDashboard config={config} metrics={metrics} daysInMonth={daysInMonth} />
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(400px, 1fr))', gap: isMobile ? 12 : 24 }}>
         <WeeklySummary weeklyData={weeklyData} />
