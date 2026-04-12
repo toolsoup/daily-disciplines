@@ -111,32 +111,32 @@ const DEFAULT_CONFIG = {
     {
       id: uuid(), name: 'Health', color: '#00B894',
       habits: [
-        { id: uuid(), name: 'Water (64oz+)', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Exercise', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Sleep 7h+', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Healthy Eating', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'No Alcohol', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Water (64oz+)', type: 'daily' },
+        { id: uuid(), name: 'Exercise', type: 'daily' },
+        { id: uuid(), name: 'Sleep 7h+', type: 'daily' },
+        { id: uuid(), name: 'Healthy Eating', type: 'daily' },
+        { id: uuid(), name: 'No Alcohol', type: 'daily' },
         { id: uuid(), name: 'Weight', type: 'number', unit: 'lbs', goal: null, direction: 'down' },
       ],
     },
     {
       id: uuid(), name: 'Personal Growth', color: '#FFD700',
       habits: [
-        { id: uuid(), name: 'Read', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Read', type: 'daily' },
         { id: uuid(), name: 'Pages Read', type: 'number', unit: 'pages', goal: 30, direction: 'up' },
-        { id: uuid(), name: 'Journal / Reflect', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Meditate', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Learn Something New', type: 'boolean', goal: 30 },
+        { id: uuid(), name: 'Journal / Reflect', type: 'daily' },
+        { id: uuid(), name: 'Meditate', type: 'daily' },
+        { id: uuid(), name: 'Learn Something New', type: 'daily' },
       ],
     },
     {
       id: uuid(), name: 'Content & Business', color: '#E94560',
       habits: [
-        { id: uuid(), name: 'Prospecting / Outreach', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'YouTube Script / Record', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Post on LinkedIn', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Engage Skool', type: 'boolean', goal: 30 },
-        { id: uuid(), name: 'Review Financials', type: 'boolean', goal: 4 },
+        { id: uuid(), name: 'Prospecting / Outreach', type: 'daily' },
+        { id: uuid(), name: 'YouTube Script / Record', type: 'daily' },
+        { id: uuid(), name: 'Post on LinkedIn', type: 'daily' },
+        { id: uuid(), name: 'Engage Skool', type: 'daily' },
+        { id: uuid(), name: 'Review Financials', type: 'per_month', perMonth: 4 },
       ],
     },
   ],
@@ -158,8 +158,75 @@ function monthKey(year, month) {
   return `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
+function migrateConfig(config) {
+  if (!config || !config.categories) return config;
+  config.categories.forEach(c => {
+    c.habits.forEach(h => {
+      if (h.type === 'boolean') {
+        // Migrate old boolean type: if goal was set and less than 28, treat as per_month
+        if (h.goal && h.goal < 28) {
+          h.type = 'per_month';
+          h.perMonth = h.goal;
+        } else {
+          h.type = 'daily';
+        }
+        delete h.goal;
+      }
+    });
+  });
+  return config;
+}
+
 function loadConfig() {
-  return loadJSON('dd-config', null) || JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  const raw = loadJSON('dd-config', null);
+  return raw ? migrateConfig(raw) : JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+}
+
+// Count how many times selected weekdays occur in a given month
+function countActiveDaysInMonth(activeDays, year, month) {
+  if (!activeDays || activeDays.length === 0) return 0;
+  const dim = new Date(year, month + 1, 0).getDate();
+  let count = 0;
+  for (let d = 1; d <= dim; d++) {
+    if (activeDays.includes(new Date(year, month, d).getDay())) count++;
+  }
+  return count;
+}
+
+// Count calendar weeks that overlap with a month (any partial week counts)
+function getWeeksInMonthCount(year, month) {
+  const dim = new Date(year, month + 1, 0).getDate();
+  let weeks = 0;
+  let d = 1;
+  while (d <= dim) {
+    weeks++;
+    const dow = new Date(year, month, d).getDay();
+    // Jump to next Monday (start of next week)
+    const daysUntilMon = dow === 0 ? 1 : (8 - dow);
+    d += daysUntilMon;
+  }
+  return weeks;
+}
+
+// Compute the effective goal for a habit given the month context
+function habitGoalForMonth(habit, year, month) {
+  const dim = new Date(year, month + 1, 0).getDate();
+  switch (habit.type) {
+    case 'daily': return dim;
+    case 'specific_days': return countActiveDaysInMonth(habit.activeDays || [], year, month);
+    case 'per_week': return (habit.perWeek || 1) * getWeeksInMonthCount(year, month);
+    case 'per_month': return habit.perMonth || 1;
+    default: return dim;
+  }
+}
+
+// Check if a day is an "active" day for a habit
+function isDayActiveForHabit(habit, year, month, day) {
+  if (habit.type === 'specific_days') {
+    const dow = new Date(year, month, day).getDay();
+    return (habit.activeDays || []).includes(dow);
+  }
+  return true;
 }
 
 function saveConfig(config) {
@@ -559,22 +626,27 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
     return map;
   }, [weekGroups]);
 
-  // Boolean habits for summary rows
+  // Check-based habits for summary rows (all non-number types)
   const boolHabits = useMemo(() =>
     config.categories.flatMap(c => c.habits.filter(h => h.type !== 'number')),
     [config]
   );
 
-  // Per-day summary stats
+  // Per-day summary stats (accounts for specific_days active/inactive)
   const daySummary = useMemo(() => {
     const result = {};
     days.forEach(d => {
-      let completed = 0, total = boolHabits.length;
-      boolHabits.forEach(h => { if (checks[cellKey(h.id, d)]) completed++; });
+      let completed = 0, total = 0;
+      boolHabits.forEach(h => {
+        // For specific_days, only count if this day is active
+        if (h.type === 'specific_days' && !(h.activeDays || []).includes(getDayOfWeek(year, month, d))) return;
+        total++;
+        if (checks[cellKey(h.id, d)]) completed++;
+      });
       result[d] = { completed, incomplete: total - completed, pct: total > 0 ? Math.round((completed / total) * 100) : 0 };
     });
     return result;
-  }, [days, boolHabits, checks]);
+  }, [days, boolHabits, checks, year, month]);
 
   // Compute total grid width for day columns (no flex stretch)
   const mondayCount = days.filter(d => getDayOfWeek(year, month, d) === 1 && d > 1).length;
@@ -695,6 +767,12 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                       {isNumber && (
                         <span style={{ color: '#94A3B8', fontSize: 9, flexShrink: 0 }}>{habit.unit}</span>
                       )}
+                      {habit.type === 'per_week' && (
+                        <span style={{ color: '#94A3B8', fontSize: 9, flexShrink: 0 }}>{habit.perWeek}x/wk</span>
+                      )}
+                      {habit.type === 'per_month' && (
+                        <span style={{ color: '#94A3B8', fontSize: 9, flexShrink: 0 }}>{habit.perMonth}x/mo</span>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: CELL_GAP, width: DAYS_W, minWidth: DAYS_W, flexShrink: 0 }}>
                       {days.map(d => {
@@ -740,17 +818,19 @@ function HabitGrid({ config, checks, metrics, toggleCheck, setMetric, collapsed,
                           );
                         }
                         const checked = !!checks[key];
+                        const isInactive = habit.type === 'specific_days' && !(habit.activeDays || []).includes(dow);
+                        const isDisabled = isFuture || isInactive;
                         return (
-                          <div key={d} onClick={() => !isFuture && toggleCheck(key)} style={{
+                          <div key={d} onClick={() => !isDisabled && toggleCheck(key)} style={{
                             width: CELL_W, minWidth: CELL_W, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            cursor: isFuture ? 'not-allowed' : 'pointer', borderRadius: 3,
-                            background: isFuture ? '#1A1F35' : (checked ? `${cat.color}25` : (todayBg || weekTint)),
-                            boxShadow: `inset 0 0 0 1px ${checked ? cat.color : '#374151'}`,
+                            cursor: isDisabled ? 'not-allowed' : 'pointer', borderRadius: 3,
+                            background: isInactive ? '#151929' : (isFuture ? '#1A1F35' : (checked ? `${cat.color}25` : (todayBg || weekTint))),
+                            boxShadow: `inset 0 0 0 1px ${checked && !isInactive ? cat.color : '#374151'}`,
                             transition: 'all 150ms',
-                            opacity: isFuture ? 0.3 : 1,
+                            opacity: isDisabled ? 0.25 : 1,
                             marginLeft: isMonday ? MONDAY_SEP : 0, borderLeft: isMonday ? '2px solid #374151' : undefined,
                           }}>
-                            {checked && <span style={{ color: cat.color, fontSize: 13, fontWeight: 700 }}>{'\u2713'}</span>}
+                            {checked && !isInactive && <span style={{ color: cat.color, fontSize: 13, fontWeight: 700 }}>{'\u2713'}</span>}
                           </div>
                         );
                       })}
@@ -1297,7 +1377,7 @@ function WeeklySummary({ weeklyData }) {
 
 // ─── Leaderboard ──────────────────────────────────────────────
 function Leaderboard({ config, habitStats }) {
-  const allHabits = flattenHabits(config).filter(h => h.type === 'boolean');
+  const allHabits = flattenHabits(config).filter(h => h.type !== 'number');
   const sorted = allHabits
     .map(h => ({ ...h, ...(habitStats[h.id] || { done: 0, pct: 0 }) }))
     .sort((a, b) => b.pct - a.pct);
@@ -1422,7 +1502,7 @@ function SettingsPanel({ isOpen, onClose, config, setConfig, user, onSignOut }) 
     const updated = {
       ...config,
       categories: config.categories.map(c =>
-        c.id === catId ? { ...c, habits: [...c.habits, { id: uuid(), name: 'New Habit', type: 'boolean', goal: 30 }] } : c
+        c.id === catId ? { ...c, habits: [...c.habits, { id: uuid(), name: 'New Habit', type: 'daily' }] } : c
       ),
     };
     setConfig(updated);
@@ -1527,27 +1607,65 @@ function SettingsPanel({ isOpen, onClose, config, setConfig, user, onSignOut }) 
                           <div style={{ display: 'flex', gap: 8 }}>
                             <input className="input" value={habit.name} onChange={e => updateHabit(cat.id, habit.id, { name: e.target.value })} placeholder="Habit name" />
                           </div>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                             <select className="select" style={{ width: 'auto' }} value={habit.type} onChange={e => {
                               const newType = e.target.value;
                               const updates = { type: newType };
                               if (newType === 'number') { updates.unit = habit.unit || 'units'; updates.direction = habit.direction || 'up'; }
+                              if (newType === 'specific_days' && !habit.activeDays) { updates.activeDays = [1, 2, 3, 4, 5]; }
+                              if (newType === 'per_week' && !habit.perWeek) { updates.perWeek = 3; }
+                              if (newType === 'per_month' && !habit.perMonth) { updates.perMonth = 10; }
                               updateHabit(cat.id, habit.id, updates);
                             }}>
-                              <option value="boolean">Checkbox</option>
-                              <option value="number">Number</option>
+                              <option value="daily">Daily</option>
+                              <option value="specific_days">Specific Days</option>
+                              <option value="per_week">X per Week</option>
+                              <option value="per_month">X per Month</option>
+                              <option value="number">Amount per Day</option>
                             </select>
+                            {habit.type === 'specific_days' && (
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                {['S','M','T','W','T','F','S'].map((label, idx) => {
+                                  const active = (habit.activeDays || []).includes(idx);
+                                  return (
+                                    <div key={idx} onClick={() => {
+                                      const current = habit.activeDays || [];
+                                      const next = active ? current.filter(d => d !== idx) : [...current, idx];
+                                      updateHabit(cat.id, habit.id, { activeDays: next });
+                                    }} style={{
+                                      width: 30, height: 30, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                      cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                                      background: active ? cat.color + '30' : '#1A1F35',
+                                      color: active ? cat.color : '#94A3B8',
+                                      border: `1px solid ${active ? cat.color : '#374151'}`,
+                                    }}>{label}</div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {habit.type === 'per_week' && (
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <input className="input" style={{ width: 60 }} type="number" min="1" max="7" value={habit.perWeek || ''} onChange={e => updateHabit(cat.id, habit.id, { perWeek: e.target.value === '' ? null : Number(e.target.value) })} />
+                                <span style={{ color: '#94A3B8', fontSize: 12 }}>times per week</span>
+                              </div>
+                            )}
+                            {habit.type === 'per_month' && (
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <input className="input" style={{ width: 60 }} type="number" min="1" value={habit.perMonth || ''} onChange={e => updateHabit(cat.id, habit.id, { perMonth: e.target.value === '' ? null : Number(e.target.value) })} />
+                                <span style={{ color: '#94A3B8', fontSize: 12 }}>times per month</span>
+                              </div>
+                            )}
                             {habit.type === 'number' && (
-                              <>
-                                <input className="input" style={{ width: 80 }} value={habit.unit || ''} onChange={e => updateHabit(cat.id, habit.id, { unit: e.target.value })} placeholder="Unit" />
+                              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                <input className="input" style={{ width: 80 }} value={habit.unit || ''} onChange={e => updateHabit(cat.id, habit.id, { unit: e.target.value })} placeholder="e.g. calls" />
                                 <select className="select" style={{ width: 'auto' }} value={habit.direction || 'up'} onChange={e => updateHabit(cat.id, habit.id, { direction: e.target.value })}>
                                   <option value="up">Higher is better</option>
                                   <option value="down">Lower is better</option>
                                 </select>
-                              </>
+                                <input className="input" style={{ width: 70 }} type="number" value={habit.goal ?? ''} onChange={e => updateHabit(cat.id, habit.id, { goal: e.target.value === '' ? null : Number(e.target.value) })} placeholder="Target" />
+                                <span style={{ color: '#94A3B8', fontSize: 11 }}>per day</span>
+                              </div>
                             )}
-                            <input className="input" style={{ width: 70 }} type="number" value={habit.goal ?? ''} onChange={e => updateHabit(cat.id, habit.id, { goal: e.target.value === '' ? null : Number(e.target.value) })} placeholder="Goal" />
-                            <span style={{ color: '#94A3B8', fontSize: 11 }}>goal/mo</span>
                           </div>
                           <button onClick={() => setEditingHabit(null)} className="btn btn-primary" style={{ alignSelf: 'flex-start', padding: '4px 12px', fontSize: 12 }}>Done</button>
                         </div>
@@ -1556,8 +1674,11 @@ function SettingsPanel({ isOpen, onClose, config, setConfig, user, onSignOut }) 
                           <span style={{ color: '#E2E8F0', fontSize: 13, flex: 1, cursor: 'pointer' }} onClick={() => setEditingHabit(habit.id)}>
                             {habit.name}
                             <span style={{ color: '#94A3B8', fontSize: 11, marginLeft: 6 }}>
-                              {habit.type === 'number' ? `${habit.unit || ''} \u2022 ${habit.direction || 'up'}` : 'checkbox'}
-                              {habit.goal ? ` \u2022 goal: ${habit.goal}` : ''}
+                              {habit.type === 'number' ? `${habit.unit || ''} \u2022 ${habit.direction || 'up'}${habit.goal ? ` \u2022 goal: ${habit.goal}` : ''}` :
+                               habit.type === 'daily' ? 'daily' :
+                               habit.type === 'specific_days' ? (habit.activeDays || []).map(d => ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d]).join('/') :
+                               habit.type === 'per_week' ? `${habit.perWeek || 0}x/week` :
+                               habit.type === 'per_month' ? `${habit.perMonth || 0}x/month` : ''}
                             </span>
                           </span>
                           <button onClick={() => moveHabit(cat.id, habit.id, -1)} className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} disabled={hIdx === 0}>{'\u25B2'}</button>
@@ -1664,6 +1785,8 @@ function App() {
   const daysInMonth = useMemo(() => getDaysInMonth(month, year), [month, year]);
   const allHabits = useMemo(() => flattenHabits(config), [config]);
   const booleanHabits = useMemo(() => allHabits.filter(h => h.type !== 'number'), [allHabits]);
+  // Need year/month for goal calculations in stats
+  // (year and month are already in scope from useState above)
 
   // ── Cloud sync on auth state change ──
   useEffect(() => {
@@ -1703,8 +1826,8 @@ function App() {
           // First login: migrate local data to cloud
           await migrateLocalToCloud(user.uid);
         } else {
-          // Returning user: pull cloud data
-          const merged = { categories: cloudConfig.categories };
+          // Returning user: pull cloud data (migrate old boolean type if needed)
+          const merged = migrateConfig({ categories: cloudConfig.categories });
           setConfigState(merged);
           saveConfig(merged);
 
@@ -1872,29 +1995,43 @@ function App() {
         const pct = goal ? Math.round((sum / goal) * 100) : (entries > 0 ? 100 : 0);
         stats[h.id] = { done: entries, pct: Math.min(pct, 100), remaining: goal ? Math.max(0, goal - sum) : 0, streak: maxStreak, sum, avg: entries > 0 ? sum / entries : 0, entries };
       } else {
+        // Check-based habits: daily, specific_days, per_week, per_month
         let done = 0; let streak = 0; let maxStreak = 0;
         for (let d = 1; d <= daysInMonth; d++) {
-          if (checks[cellKey(h.id, d)]) { done++; streak++; if (streak > maxStreak) maxStreak = streak; }
-          else { streak = 0; }
+          const checked = !!checks[cellKey(h.id, d)];
+          if (h.type === 'specific_days') {
+            // Only count checks on active days toward progress
+            const isActive = isDayActiveForHabit(h, year, month, d);
+            if (isActive && checked) { done++; streak++; if (streak > maxStreak) maxStreak = streak; }
+            else if (isActive) { streak = 0; }
+            // Non-active day checks don't break streak or count toward goal
+          } else {
+            if (checked) { done++; streak++; if (streak > maxStreak) maxStreak = streak; }
+            else { streak = 0; }
+          }
         }
-        const goal = h.goal && h.goal <= daysInMonth ? h.goal : daysInMonth;
+        const goal = habitGoalForMonth(h, year, month);
         const pct = goal > 0 ? Math.round((done / goal) * 100) : 0;
         stats[h.id] = { done, pct: Math.min(pct, 100), remaining: Math.max(0, goal - done), streak: maxStreak, goal };
       }
     });
     return stats;
-  }, [allHabits, checks, metrics, daysInMonth]);
+  }, [allHabits, checks, metrics, daysInMonth, year, month]);
 
-  // ── Daily stats (boolean habits only) ──
+  // ── Daily stats (check-based habits) ──
   const dailyData = useMemo(() => {
     const data = [];
     for (let d = 1; d <= daysInMonth; d++) {
-      let count = 0;
-      booleanHabits.forEach(h => { if (checks[cellKey(h.id, d)]) count++; });
-      data.push({ day: d, pct: booleanHabits.length > 0 ? Math.round((count / booleanHabits.length) * 100) : 0, count });
+      let count = 0, total = 0;
+      booleanHabits.forEach(h => {
+        if (h.type === 'specific_days' && !(h.activeDays || []).includes(getDayOfWeek(year, month, d))) return;
+        total++;
+        if (checks[cellKey(h.id, d)]) count++;
+      });
+      data.push({ day: d, pct: total > 0 ? Math.round((count / total) * 100) : 0, count });
     }
     return data;
-  }, [booleanHabits, checks, daysInMonth]);
+  }, [booleanHabits, checks, daysInMonth, year, month]);
 
   // ── Global stats ──
   const { totalDone, totalPossible, overallPct, bestStreak, todayScore, todayTotal } = useMemo(() => {
@@ -1905,21 +2042,25 @@ function App() {
       const s = habitStats[h.id];
       if (s) {
         totalDone += s.done;
-        totalPossible += (s.goal || daysInMonth);
+        totalPossible += (s.goal || habitGoalForMonth(h, year, month));
         if (s.streak > bestStreak.count) bestStreak = { habit: h.name, count: s.streak };
       }
     });
 
     const today = now.getDate();
-    let todayScore = 0;
-    booleanHabits.forEach(h => { if (checks[cellKey(h.id, today)]) todayScore++; });
+    let todayScore = 0, todayTotal = 0;
+    booleanHabits.forEach(h => {
+      if (h.type === 'specific_days' && !(h.activeDays || []).includes(getDayOfWeek(year, month, today))) return;
+      todayTotal++;
+      if (checks[cellKey(h.id, today)]) todayScore++;
+    });
 
     return {
       totalDone, totalPossible,
       overallPct: totalPossible > 0 ? Math.round((totalDone / totalPossible) * 100) : 0,
-      bestStreak, todayScore, todayTotal: booleanHabits.length,
+      bestStreak, todayScore, todayTotal,
     };
-  }, [booleanHabits, habitStats, checks, daysInMonth]);
+  }, [booleanHabits, habitStats, checks, daysInMonth, year, month]);
 
   // ── Weekly summaries ──
   const weeklyData = useMemo(() => {
@@ -1929,13 +2070,17 @@ function App() {
       const end = Math.min(start + 6, daysInMonth);
       let done = 0, possible = 0;
       for (let d = start; d <= end; d++) {
-        booleanHabits.forEach(h => { possible++; if (checks[cellKey(h.id, d)]) done++; });
+        booleanHabits.forEach(h => {
+          if (h.type === 'specific_days' && !(h.activeDays || []).includes(getDayOfWeek(year, month, d))) return;
+          possible++;
+          if (checks[cellKey(h.id, d)]) done++;
+        });
       }
       weeks.push({ week: `Wk ${weekNum}`, pct: possible > 0 ? Math.round((done / possible) * 100) : 0, days: `${start}-${end}` });
       weekNum++;
     }
     return weeks;
-  }, [booleanHabits, checks, daysInMonth]);
+  }, [booleanHabits, checks, daysInMonth, year, month]);
 
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '8px 6px' : '24px 16px' }}>
