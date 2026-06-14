@@ -46,8 +46,9 @@
     .input:focus { border-color: #3B82F6; }
     .select { background: #252B45; color: #E2E8F0; border: 1px solid #374151; border-radius: 8px; padding: 8px 12px; font-size: 14px; cursor: pointer; outline: none; }
     .num-cell { width: 32px; height: 28px; background: #252B45; color: #E2E8F0; border: 1px solid #374151; border-radius: 4px; text-align: center; font-size: 11px; outline: none; padding: 0; }
-    .num-cell:focus { border-color: #3B82F6; }
+    .num-cell:focus { border-color: #3B82F6; box-shadow: 0 0 0 2px rgba(59,130,246,0.3); }
     .num-cell.has-value { background: rgba(59,130,246,0.15); border-color: #3B82F6; }
+    .engine-input:focus { border-color: #3B82F6 !important; box-shadow: 0 0 0 2px rgba(59,130,246,0.3); }
     .streak-badge { display: inline-flex; align-items: center; gap: 2px; background: #FF6B3520; color: #FF6B35; font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 10px; }
     .freeze-col { position: -webkit-sticky !important; position: sticky !important; left: 0 !important; z-index: 10 !important; background: #1A1F35 !important; box-shadow: -24px 0 0 0 #1A1F35, 4px 0 6px -2px rgba(0,0,0,0.3) !important; align-self: stretch; }
     .habit-row { display: flex; align-items: center; min-height: 32px; transition: background 150ms; }
@@ -474,7 +475,7 @@ function saveJournal(year, month, data) {
 }
 
 // ─── Header ───────────────────────────────────────────────────
-function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, user, onSignIn, syncStatus }) {
+function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, user, onSignIn, syncStatus, activeTab }) {
   const isMobile = useIsMobile();
   const months = Array.from({ length: 12 }, (_, i) => i);
   const years = [2024, 2025, 2026, 2027, 2028];
@@ -495,12 +496,16 @@ function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, us
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 12 }}>
-          <select value={month} onChange={e => setMonth(Number(e.target.value))} className="select" style={isMobile ? { padding: '6px 8px', fontSize: 12 } : undefined}>
-            {months.map(m => <option key={m} value={m}>{getMonthName(m)}</option>)}
-          </select>
-          <select value={year} onChange={e => setYear(Number(e.target.value))} className="select" style={isMobile ? { padding: '6px 8px', fontSize: 12 } : undefined}>
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+          {activeTab !== 'engine' && (
+            <>
+              <select value={month} onChange={e => setMonth(Number(e.target.value))} className="select" style={isMobile ? { padding: '6px 8px', fontSize: 12 } : undefined}>
+                {months.map(m => <option key={m} value={m}>{getMonthName(m)}</option>)}
+              </select>
+              <select value={year} onChange={e => setYear(Number(e.target.value))} className="select" style={isMobile ? { padding: '6px 8px', fontSize: 12 } : undefined}>
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </>
+          )}
 
           {/* Auth: Sign in or show avatar */}
           {user ? (
@@ -524,19 +529,21 @@ function Header({ month, year, setMonth, setYear, overallPct, onOpenSettings, us
           </button>
         </div>
 
-        <div style={{ position: 'relative', width: pieSize, height: pieSize }}>
-          <ResponsiveContainer width="100%" height="100%">
-            <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" innerRadius={pieInner} outerRadius={pieOuter} dataKey="value" startAngle={90} endAngle={-270} strokeWidth={0}>
-                <Cell fill="#3B82F6" />
-                <Cell fill="#252B45" />
-              </Pie>
-            </PieChart>
-          </ResponsiveContainer>
-          <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
-            <span style={{ fontSize: isMobile ? 12 : 16, fontWeight: 700, color: '#3B82F6' }}>{overallPct}%</span>
+        {activeTab !== 'engine' && (
+          <div style={{ position: 'relative', width: pieSize, height: pieSize }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={pieData} cx="50%" cy="50%" innerRadius={pieInner} outerRadius={pieOuter} dataKey="value" startAngle={90} endAngle={-270} strokeWidth={0}>
+                  <Cell fill="#3B82F6" />
+                  <Cell fill="#252B45" />
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center' }}>
+              <span style={{ fontSize: isMobile ? 12 : 16, fontWeight: 700, color: '#3B82F6' }}>{overallPct}%</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
@@ -1751,6 +1758,1180 @@ function SettingsPanel({ isOpen, onClose, config, setConfig, user, onSignOut }) 
   );
 }
 
+// ─── ENGINE: Fitness Module ───────────────────────────────────
+// Color constants for session types
+const ENGINE_COLORS = {
+  push: '#3B82F6',
+  pull: '#3B82F6',
+  legs: '#3B82F6',
+  walk: '#14B8A6',
+  interval: '#EF4444',
+  benchmark: '#F59E0B',
+  rest: '#374151',
+};
+
+const SESSION_LABELS = {
+  push: 'Push (Chest, Shoulders, Triceps)',
+  pull: 'Pull (Back, Rear Delts, Biceps)',
+  legs: 'Legs (Quads, Hams, Glutes, Calves)',
+  walk: 'Easy Aerobic Walk',
+  interval: 'Hard Intervals',
+  benchmark: 'Benchmark Test',
+  rest: 'Rest Day',
+};
+
+// ─── Strength Templates ─────────────────────────────────────
+const STRENGTH_TEMPLATES = {
+  push: [
+    { name: 'Smith Machine Bench Press', sets: 3, repsRange: '8-10' },
+    { name: 'Incline Dumbbell Press', sets: 3, repsRange: '10-12' },
+    { name: 'Chest Press Machine', sets: 3, repsRange: '12' },
+    { name: 'Dumbbell Shoulder Press', sets: 3, repsRange: '10' },
+    { name: 'Cable Lateral Raise', sets: 3, repsRange: '15' },
+    { name: 'Tricep Rope Pushdown', sets: 3, repsRange: '12-15' },
+    { name: 'Cable Crunch', sets: 3, repsRange: '15' },
+  ],
+  pull: [
+    { name: 'Lat Pulldown', sets: 3, repsRange: '10-12' },
+    { name: 'Seated Cable Row', sets: 3, repsRange: '10-12' },
+    { name: 'Assisted Pull-Up Machine', sets: 3, repsRange: '8-10' },
+    { name: 'Dumbbell Row', sets: 3, repsRange: '10' },
+    { name: 'Rear Delt Fly Machine', sets: 3, repsRange: '15' },
+    { name: 'Dumbbell Curl', sets: 3, repsRange: '12' },
+    { name: "Captain's Chair Leg Raise", sets: 3, repsRange: '12' },
+  ],
+  legs: [
+    { name: 'Smith Machine Squat', sets: 3, repsRange: '8-10' },
+    { name: 'Leg Press', sets: 3, repsRange: '12' },
+    { name: 'Smith Romanian Deadlift', sets: 3, repsRange: '10' },
+    { name: 'Leg Extension', sets: 3, repsRange: '15' },
+    { name: 'Seated Leg Curl', sets: 3, repsRange: '12' },
+    { name: 'Calf Raise Machine', sets: 3, repsRange: '15-20' },
+    { name: 'Decline Crunch', sets: 3, repsRange: '15' },
+  ],
+};
+
+// ─── Cardio Ramp by Week ────────────────────────────────────
+const CARDIO_RAMP = [
+  { week: 1, walks: { target: 4, duration: '30 min' }, intervals: [{ id: 'A', protocol: 'Bike: 30s hard / 90s easy x 6' }], benchmark: true },
+  { week: 2, walks: { target: 5, duration: '35 min' }, intervals: [{ id: 'A', protocol: '30s hard / 90s easy x 7' }], benchmark: false },
+  { week: 3, walks: { target: 5, duration: '40 min, incline' }, intervals: [{ id: 'A', protocol: '30s hard / 90s easy x 8' }], benchmark: false },
+  { week: 4, walks: { target: 5, duration: '40 min, incline' }, intervals: [{ id: 'A', protocol: '30s hard / 90s easy x 8' }, { id: 'B', protocol: '4x4: 4 min hard / 3 min easy x 3' }], benchmark: true },
+  { week: 5, walks: { target: 5, duration: '40 min, incline' }, intervals: [{ id: 'A', protocol: '30s hard / 90s easy x 8' }, { id: 'B', protocol: 'Norwegian 4x4: 4 min hard / 3 min easy x 4' }], benchmark: false },
+  { week: 6, walks: { target: 6, duration: '45 min' }, intervals: [{ id: 'A', protocol: '40s hard / 20s easy x 8' }, { id: 'B', protocol: 'Norwegian 4x4: 4 min hard / 3 min easy x 4' }], benchmark: false },
+  { week: 7, walks: { target: 6, duration: '45 min + 10lb pack' }, intervals: [{ id: 'A', protocol: 'Norwegian 4x4: 4 min hard / 3 min easy x 4' }, { id: 'B', protocol: '30s hard / 30s easy x 10' }], benchmark: false },
+  { week: 8, walks: { target: 6, duration: '45 min, incline + pack' }, intervals: [{ id: 'A', protocol: 'Norwegian 4x4 (faster pace)' }, { id: 'B', protocol: '40s hard / 20s easy x 8' }], benchmark: true },
+];
+
+// Build a shifted cardio ramp for subsequent blocks (start from week 3 volumes)
+function getCardioRampForBlock(blockNumber) {
+  if (blockNumber <= 1) return CARDIO_RAMP;
+  // Shift: new week 1 = old week 3 volumes, ramp up from there
+  const shifted = [];
+  for (let w = 0; w < 8; w++) {
+    const sourceIdx = Math.min(w + 2, 7); // offset by 2 weeks
+    const src = CARDIO_RAMP[sourceIdx];
+    shifted.push({ ...src, week: w + 1, benchmark: CARDIO_RAMP[w].benchmark });
+  }
+  return shifted;
+}
+
+// ─── HR Zone Calculator ─────────────────────────────────────
+function computeHRZones(age) {
+  const maxHR = Math.round(208 - 0.7 * age);
+  return {
+    maxHR,
+    easy: { low: Math.round(maxHR * 0.60), high: Math.round(maxHR * 0.70) },
+    moderate: { low: Math.round(maxHR * 0.70), high: Math.round(maxHR * 0.90) },
+    hard: { low: Math.round(maxHR * 0.90), high: maxHR },
+  };
+}
+
+// ─── Deterministic Plan Generator ───────────────────────────
+function generateDayPlan(dayIndex, blockNumber) {
+  const cycleDay = dayIndex % 4; // 0=Push, 1=Pull, 2=Legs, 3=Rest
+  const week = Math.min(Math.floor(dayIndex / 7) + 1, 8);
+  const strengthType = ['push', 'pull', 'legs', 'rest'][cycleDay];
+  const ramp = getCardioRampForBlock(blockNumber);
+  const weekData = ramp[week - 1];
+  return { dayIndex, cycleDay, week, strengthType, weekData };
+}
+
+function generateFullBlockPlan(blockNumber) {
+  const ramp = getCardioRampForBlock(blockNumber);
+  const days = [];
+
+  // First pass: assign strength
+  for (let i = 0; i < 56; i++) {
+    const plan = generateDayPlan(i, blockNumber);
+    days.push({
+      dayIndex: i,
+      week: plan.week,
+      strength: plan.strengthType,
+      cardio: [], // filled below
+      isBenchmark: false,
+    });
+  }
+
+  // Second pass: greedy cardio fill per week
+  for (let w = 1; w <= 8; w++) {
+    const weekDays = days.filter(d => d.week === w);
+    const weekData = ramp[w - 1];
+
+    // Assign walks: Push, Pull, Rest days first (never Legs)
+    let walkCount = 0;
+    const walkTarget = weekData.walks.target;
+    // Priority: Rest > Push > Pull
+    const walkPriority = weekDays.filter(d => d.strength === 'rest')
+      .concat(weekDays.filter(d => d.strength === 'push'))
+      .concat(weekDays.filter(d => d.strength === 'pull'));
+    for (const d of walkPriority) {
+      if (walkCount >= walkTarget) break;
+      d.cardio.push({ type: 'walk', duration: weekData.walks.duration });
+      walkCount++;
+    }
+
+    // Assign intervals: Rest days first, then Pull. Never Legs or day before Legs.
+    const intervalTarget = weekData.intervals.length;
+    let intervalCount = 0;
+    // Find legs day indices for this week
+    const legsDayIndices = new Set(weekDays.filter(d => d.strength === 'legs').map(d => d.dayIndex));
+    const dayBeforeLegs = new Set([...legsDayIndices].map(i => i - 1));
+    const intervalPriority = weekDays.filter(d => d.strength === 'rest' && !legsDayIndices.has(d.dayIndex) && !dayBeforeLegs.has(d.dayIndex))
+      .concat(weekDays.filter(d => d.strength === 'pull' && !legsDayIndices.has(d.dayIndex) && !dayBeforeLegs.has(d.dayIndex)));
+
+    for (const d of intervalPriority) {
+      if (intervalCount >= intervalTarget) break;
+      const intervalData = weekData.intervals[intervalCount];
+      d.cardio.push({ type: 'interval', slot: intervalData.id, protocol: intervalData.protocol });
+      intervalCount++;
+    }
+
+    // Benchmark flag
+    if (weekData.benchmark) {
+      const firstTrainingDay = weekDays.find(d => d.strength !== 'rest');
+      if (firstTrainingDay) firstTrainingDay.isBenchmark = true;
+    }
+  }
+
+  return days;
+}
+
+// Get plan for a specific date
+function getPlanForDate(dateStr, blockStartDate, blockNumber) {
+  const start = new Date(blockStartDate + 'T00:00:00');
+  const target = new Date(dateStr + 'T00:00:00');
+  const dayIndex = Math.round((target - start) / 86400000);
+  if (dayIndex < 0 || dayIndex >= 56) return null;
+  const fullPlan = generateFullBlockPlan(blockNumber);
+  return fullPlan[dayIndex];
+}
+
+// ─── Firestore Engine Data Layer ────────────────────────────
+function engineProfileRef(uid) {
+  return db.collection('users').doc(uid).collection('engine').doc('profile');
+}
+function engineWorkoutLogsRef(uid) {
+  return db.collection('users').doc(uid).collection('engine_workout_logs');
+}
+function engineStrengthSetsRef(uid) {
+  return db.collection('users').doc(uid).collection('engine_strength_sets');
+}
+function engineCheckinsRef(uid) {
+  return db.collection('users').doc(uid).collection('engine_checkins');
+}
+function engineTestResultsRef(uid) {
+  return db.collection('users').doc(uid).collection('engine_test_results');
+}
+
+async function loadEngineProfile(uid) {
+  try {
+    const snap = await engineProfileRef(uid).get();
+    if (snap.exists) return snap.data();
+  } catch (err) { console.error('Engine profile load error:', err); }
+  return null;
+}
+
+async function saveEngineProfile(uid, data) {
+  try {
+    await engineProfileRef(uid).set(data, { merge: true });
+  } catch (err) { console.error('Engine profile save error:', err); }
+}
+
+async function saveWorkoutLog(uid, log) {
+  try {
+    const docId = `${log.logDate}_${log.sessionType}${log.sessionSlot ? '_' + log.sessionSlot : ''}`;
+    await engineWorkoutLogsRef(uid).doc(docId).set({ ...log, userId: uid }, { merge: true });
+  } catch (err) { console.error('Workout log save error:', err); }
+}
+
+async function loadWorkoutLogs(uid) {
+  try {
+    const snap = await engineWorkoutLogsRef(uid).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) { console.error('Workout logs load error:', err); return []; }
+}
+
+async function saveStrengthSets(uid, logDate, exerciseName, sets) {
+  try {
+    for (const s of sets) {
+      const docId = `${logDate}_${exerciseName}_${s.setIndex}`;
+      await engineStrengthSetsRef(uid).doc(docId).set({
+        userId: uid, logDate, exerciseName, setIndex: s.setIndex,
+        weight: s.weight, reps: s.reps,
+      }, { merge: true });
+    }
+  } catch (err) { console.error('Strength sets save error:', err); }
+}
+
+async function loadStrengthSets(uid) {
+  try {
+    const snap = await engineStrengthSetsRef(uid).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) { console.error('Strength sets load error:', err); return []; }
+}
+
+async function saveCheckin(uid, data) {
+  try {
+    await engineCheckinsRef(uid).doc(data.checkinDate).set({ ...data, userId: uid }, { merge: true });
+  } catch (err) { console.error('Checkin save error:', err); }
+}
+
+async function loadCheckins(uid) {
+  try {
+    const snap = await engineCheckinsRef(uid).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) { console.error('Checkins load error:', err); return []; }
+}
+
+async function saveTestResult(uid, data) {
+  try {
+    const docId = `${data.testDate}_${data.blockNumber}`;
+    await engineTestResultsRef(uid).doc(docId).set({ ...data, userId: uid }, { merge: true });
+  } catch (err) { console.error('Test result save error:', err); }
+}
+
+async function loadTestResults(uid) {
+  try {
+    const snap = await engineTestResultsRef(uid).get();
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err) { console.error('Test results load error:', err); return []; }
+}
+
+// ─── Engine Setup Component ─────────────────────────────────
+function EngineSetup({ onComplete }) {
+  const [age, setAge] = useState('');
+  const isMobile = useIsMobile();
+
+  const handleSubmit = () => {
+    const ageNum = parseInt(age);
+    if (isNaN(ageNum) || ageNum < 13 || ageNum > 100) return;
+    const today = new Date();
+    const blockStartDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    onComplete({ age: ageNum, blockStartDate, blockNumber: 1 });
+  };
+
+  const zones = age && parseInt(age) >= 13 ? computeHRZones(parseInt(age)) : null;
+
+  return (
+    <div style={{ maxWidth: 480, margin: '0 auto', padding: isMobile ? 16 : 32 }}>
+      <div className="dashboard-card" style={{ padding: isMobile ? 20 : 32 }}>
+        <div style={{ textAlign: 'center', marginBottom: 24 }}>
+          <div style={{ fontSize: 32, marginBottom: 8 }}>{'\u2699\uFE0F'}</div>
+          <h2 style={{ fontSize: 22, fontWeight: 700, color: '#E2E8F0', marginBottom: 4 }}>Engine Setup</h2>
+          <p style={{ color: '#94A3B8', fontSize: 14 }}>Enter your age to generate your 8-week program</p>
+        </div>
+
+        <label style={{ display: 'block', color: '#94A3B8', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+          Your Age
+        </label>
+        <input
+          type="number" inputMode="numeric" min="13" max="100"
+          className="input" style={{ fontSize: 18, textAlign: 'center', marginBottom: 16 }}
+          value={age} onChange={e => setAge(e.target.value)}
+          placeholder="e.g. 35"
+          aria-label="Your age"
+        />
+
+        {zones && (
+          <div style={{ marginBottom: 20 }}>
+            <h3 style={{ color: '#E2E8F0', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Your Heart Rate Zones</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(20,184,166,0.15)', borderRadius: 8, borderLeft: '3px solid #14B8A6' }}>
+                <span style={{ color: '#14B8A6', fontWeight: 600, fontSize: 13 }}>Easy (walks)</span>
+                <span style={{ color: '#E2E8F0', fontSize: 13 }}>{zones.easy.low}-{zones.easy.high} bpm</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(59,130,246,0.15)', borderRadius: 8, borderLeft: '3px solid #3B82F6' }}>
+                <span style={{ color: '#3B82F6', fontWeight: 600, fontSize: 13 }}>Moderate</span>
+                <span style={{ color: '#E2E8F0', fontSize: 13 }}>{zones.moderate.low}-{zones.moderate.high} bpm</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', background: 'rgba(239,68,68,0.15)', borderRadius: 8, borderLeft: '3px solid #EF4444' }}>
+                <span style={{ color: '#EF4444', fontWeight: 600, fontSize: 13 }}>Hard (intervals)</span>
+                <span style={{ color: '#E2E8F0', fontSize: 13 }}>{zones.hard.low}+ bpm</span>
+              </div>
+              <div style={{ padding: '8px 12px', background: '#252B45', borderRadius: 8 }}>
+                <span style={{ color: '#94A3B8', fontSize: 12 }}>Max HR: {zones.maxHR} bpm</span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <button onClick={handleSubmit} className="btn btn-primary" style={{ width: '100%', padding: '12px 24px', fontSize: 16, marginTop: 8 }}
+          disabled={!age || parseInt(age) < 13}>
+          Start 8-Week Program
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Engine Strength Card ───────────────────────────────────
+function EngineStrengthCard({ sessionType, exercises, existingSets, onSaveSets, completed, onToggleComplete, note, onNoteChange }) {
+  const isMobile = useIsMobile();
+  const [localSets, setLocalSets] = useState(() => {
+    const init = {};
+    exercises.forEach(ex => {
+      init[ex.name] = [];
+      for (let s = 0; s < ex.sets; s++) {
+        const existing = existingSets.find(es => es.exerciseName === ex.name && es.setIndex === s);
+        init[ex.name].push({
+          setIndex: s,
+          weight: existing ? existing.weight : '',
+          reps: existing ? existing.reps : '',
+        });
+      }
+    });
+    return init;
+  });
+
+  const updateSet = (exName, setIdx, field, value) => {
+    setLocalSets(prev => {
+      const next = { ...prev };
+      next[exName] = [...next[exName]];
+      next[exName][setIdx] = { ...next[exName][setIdx], [field]: value };
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    const allSets = [];
+    Object.entries(localSets).forEach(([exName, sets]) => {
+      sets.forEach(s => {
+        if (s.weight || s.reps) {
+          allSets.push({ exerciseName: exName, setIndex: s.setIndex, weight: parseFloat(s.weight) || 0, reps: parseInt(s.reps) || 0 });
+        }
+      });
+    });
+    onSaveSets(allSets);
+    onToggleComplete(true);
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 16, borderLeft: `3px solid ${ENGINE_COLORS[sessionType]}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color: ENGINE_COLORS[sessionType] }}>
+          {SESSION_LABELS[sessionType]}
+        </h3>
+        {completed && <span style={{ color: '#00B894', fontSize: 18 }}>{'\u2713'}</span>}
+      </div>
+
+      {exercises.map(ex => (
+        <div key={ex.name} style={{ marginBottom: 14 }}>
+          <div style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+            {ex.name} <span style={{ color: '#94A3B8', fontWeight: 400 }}>{ex.sets} x {ex.repsRange}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {localSets[ex.name]?.map((s, idx) => (
+              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#1A1F35', borderRadius: 8, padding: '4px 8px' }}>
+                <span style={{ color: '#94A3B8', fontSize: 11, minWidth: 14 }}>S{idx + 1}</span>
+                <input
+                  type="number" inputMode="decimal" placeholder="lbs"
+                  style={{ width: 52, height: 36, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 6, textAlign: 'center', fontSize: 14, outline: 'none', padding: 0 }}
+                  value={s.weight} onChange={e => updateSet(ex.name, idx, 'weight', e.target.value)}
+                  aria-label={`${ex.name} set ${idx + 1} weight`}
+                />
+                <span style={{ color: '#94A3B8', fontSize: 11 }}>x</span>
+                <input
+                  type="number" inputMode="numeric" placeholder="reps"
+                  style={{ width: 44, height: 36, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 6, textAlign: 'center', fontSize: 14, outline: 'none', padding: 0 }}
+                  value={s.reps} onChange={e => updateSet(ex.name, idx, 'reps', e.target.value)}
+                  aria-label={`${ex.name} set ${idx + 1} reps`}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <textarea
+        className="input" style={{ minHeight: 40, resize: 'vertical', fontSize: 13, marginBottom: 12 }}
+        placeholder="Session notes (optional)"
+        value={note || ''} onChange={e => onNoteChange(e.target.value)}
+        aria-label="Session notes"
+      />
+
+      <button onClick={handleSave} className="btn btn-primary" style={{ width: '100%', padding: '10px 16px' }}>
+        {completed ? 'Update Session' : 'Complete Session'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Engine Cardio Card ─────────────────────────────────────
+function EngineCardioCard({ cardioItem, zones, completed, onToggleComplete, note, onNoteChange }) {
+  const isMobile = useIsMobile();
+  const isWalk = cardioItem.type === 'walk';
+  const color = isWalk ? ENGINE_COLORS.walk : ENGINE_COLORS.interval;
+  const zone = isWalk ? zones.easy : zones.hard;
+  const talkTest = isWalk ? 'You should be able to speak in full sentences' : 'Only a few words between breaths';
+
+  return (
+    <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 16, borderLeft: `3px solid ${color}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 700, color }}>
+          {isWalk ? 'Easy Walk' : `Intervals${cardioItem.slot ? ' (' + cardioItem.slot + ')' : ''}`}
+        </h3>
+        {completed && <span style={{ color: '#00B894', fontSize: 18 }}>{'\u2713'}</span>}
+      </div>
+
+      <div style={{ color: '#E2E8F0', fontSize: 14, marginBottom: 8 }}>
+        {isWalk ? cardioItem.duration : cardioItem.protocol}
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 8, flexWrap: 'wrap' }}>
+        <div style={{ background: `${color}20`, padding: '6px 12px', borderRadius: 8 }}>
+          <span style={{ color, fontSize: 13, fontWeight: 600 }}>Target: {zone.low}-{zone.high} bpm</span>
+        </div>
+      </div>
+      <p style={{ color: '#94A3B8', fontSize: 12, marginBottom: 12 }}>{talkTest}</p>
+
+      <textarea
+        className="input" style={{ minHeight: 36, resize: 'vertical', fontSize: 13, marginBottom: 12 }}
+        placeholder="Notes (optional)"
+        value={note || ''} onChange={e => onNoteChange(e.target.value)}
+        aria-label="Cardio notes"
+      />
+
+      <button onClick={() => onToggleComplete(!completed)} className="btn" style={{ width: '100%', padding: '10px 16px', background: completed ? '#252B45' : color, color: 'white' }}>
+        {completed ? 'Mark Incomplete' : 'Complete'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Engine Checkin Card ────────────────────────────────────
+function EngineCheckinCard({ checkin, onSave }) {
+  const [rhr, setRhr] = useState(checkin?.restingHR || '');
+  const [feel, setFeel] = useState(checkin?.feelRating || 0);
+  const [note, setNote] = useState(checkin?.note || '');
+
+  const handleSave = () => {
+    onSave({ restingHR: parseInt(rhr) || null, feelRating: feel, note });
+  };
+
+  const feelLabels = ['', 'Terrible', 'Poor', 'Okay', 'Good', 'Great'];
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 16, borderLeft: '3px solid #8B5CF6' }}>
+      <h3 style={{ fontSize: 16, fontWeight: 700, color: '#8B5CF6', marginBottom: 12 }}>Daily Check-in</h3>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Resting Heart Rate (from Oura)</label>
+        <input
+          type="number" inputMode="numeric" placeholder="e.g. 58"
+          style={{ width: 100, height: 40, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, textAlign: 'center', fontSize: 16, outline: 'none' }}
+          value={rhr} onChange={e => setRhr(e.target.value)}
+          aria-label="Resting heart rate"
+        />
+        <span style={{ color: '#94A3B8', fontSize: 12, marginLeft: 8 }}>bpm</span>
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 8 }}>How do you feel?</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {[1, 2, 3, 4, 5].map(n => (
+            <button key={n} onClick={() => setFeel(n)}
+              style={{
+                width: 48, height: 48, borderRadius: 12, border: feel === n ? '2px solid #8B5CF6' : '1px solid #374151',
+                background: feel === n ? 'rgba(139,92,246,0.2)' : '#252B45', color: '#E2E8F0', fontSize: 18,
+                cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              }}
+              aria-label={`Feel rating ${n}: ${feelLabels[n]}`}
+            >
+              <span style={{ fontSize: 14 }}>{n}</span>
+            </button>
+          ))}
+        </div>
+        {feel > 0 && <span style={{ color: '#94A3B8', fontSize: 12, marginTop: 4, display: 'block' }}>{feelLabels[feel]}</span>}
+      </div>
+
+      <textarea className="input" style={{ minHeight: 36, resize: 'vertical', fontSize: 13, marginBottom: 12 }}
+        placeholder="Notes (optional)" value={note} onChange={e => setNote(e.target.value)} aria-label="Check-in notes" />
+
+      <button onClick={handleSave} className="btn btn-primary" style={{ width: '100%', padding: '10px 16px' }}>
+        Save Check-in
+      </button>
+    </div>
+  );
+}
+
+// ─── Engine Benchmark Card ──────────────────────────────────
+function EngineBenchmarkCard({ existing, blockNumber, onSave }) {
+  const [distance, setDistance] = useState(existing?.distance || '');
+  const [unit, setUnit] = useState(existing?.distanceUnit || 'miles');
+  const [finishHR, setFinishHR] = useState(existing?.finishHR || '');
+  const [restHR, setRestHR] = useState(existing?.restingHR || '');
+  const [note, setNote] = useState(existing?.note || '');
+
+  const handleSave = () => {
+    const today = new Date();
+    const testDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    onSave({ testDate, distance: parseFloat(distance) || 0, distanceUnit: unit, finishHR: parseInt(finishHR) || null, restingHR: parseInt(restHR) || null, note, blockNumber });
+  };
+
+  return (
+    <div className="dashboard-card" style={{ padding: 16, marginBottom: 16, borderLeft: `3px solid ${ENGINE_COLORS.benchmark}` }}>
+      <h3 style={{ fontSize: 16, fontWeight: 700, color: ENGINE_COLORS.benchmark, marginBottom: 12 }}>Benchmark Test</h3>
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div>
+          <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Distance</label>
+          <input type="number" inputMode="decimal" placeholder="0.0"
+            style={{ width: 80, height: 40, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, textAlign: 'center', fontSize: 16, outline: 'none' }}
+            value={distance} onChange={e => setDistance(e.target.value)} aria-label="Distance covered" />
+        </div>
+        <div>
+          <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Unit</label>
+          <select className="select" style={{ height: 40 }} value={unit} onChange={e => setUnit(e.target.value)} aria-label="Distance unit">
+            <option value="miles">miles</option>
+            <option value="km">km</option>
+            <option value="meters">meters</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Finish HR</label>
+          <input type="number" inputMode="numeric" placeholder="bpm"
+            style={{ width: 72, height: 40, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, textAlign: 'center', fontSize: 16, outline: 'none' }}
+            value={finishHR} onChange={e => setFinishHR(e.target.value)} aria-label="Finishing heart rate" />
+        </div>
+        <div>
+          <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Rest HR</label>
+          <input type="number" inputMode="numeric" placeholder="bpm"
+            style={{ width: 72, height: 40, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 8, textAlign: 'center', fontSize: 16, outline: 'none' }}
+            value={restHR} onChange={e => setRestHR(e.target.value)} aria-label="Resting heart rate this morning" />
+        </div>
+      </div>
+
+      <textarea className="input" style={{ minHeight: 36, resize: 'vertical', fontSize: 13, marginBottom: 12 }}
+        placeholder="Test notes (optional)" value={note} onChange={e => setNote(e.target.value)} aria-label="Benchmark notes" />
+
+      <button onClick={handleSave} className="btn" style={{ width: '100%', padding: '10px 16px', background: ENGINE_COLORS.benchmark, color: '#1A1F35', fontWeight: 700 }}>
+        Save Benchmark
+      </button>
+    </div>
+  );
+}
+
+// ─── Engine Today View ──────────────────────────────────────
+function EngineTodayView({ profile, workoutLogs, strengthSets, checkins, testResults, user, onDataChange, selectedDate, setSelectedDate }) {
+  const isMobile = useIsMobile();
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const dayPlan = useMemo(() => getPlanForDate(selectedDate, profile.blockStartDate, profile.blockNumber), [selectedDate, profile]);
+  const zones = useMemo(() => computeHRZones(profile.age), [profile.age]);
+  const fullPlan = useMemo(() => generateFullBlockPlan(profile.blockNumber), [profile.blockNumber]);
+
+  // Existing data for selected date
+  const dayLogs = workoutLogs.filter(l => l.logDate === selectedDate);
+  const daySets = strengthSets.filter(s => s.logDate === selectedDate);
+  const dayCheckin = checkins.find(c => c.checkinDate === selectedDate);
+
+  // Most recent sets per exercise for prefill
+  const lastSetsForExercise = useCallback((exerciseName) => {
+    return strengthSets
+      .filter(s => s.exerciseName === exerciseName && s.logDate < selectedDate)
+      .sort((a, b) => b.logDate.localeCompare(a.logDate))
+      .slice(0, 3);
+  }, [strengthSets, selectedDate]);
+
+  // Build prefilled sets
+  const prefillSets = useCallback((exercises) => {
+    const result = [];
+    exercises.forEach(ex => {
+      const last = lastSetsForExercise(ex.name);
+      for (let s = 0; s < ex.sets; s++) {
+        const existing = daySets.find(es => es.exerciseName === ex.name && es.setIndex === s);
+        const prev = last.find(l => l.setIndex === s);
+        result.push({
+          exerciseName: ex.name,
+          setIndex: s,
+          weight: existing?.weight ?? prev?.weight ?? '',
+          reps: existing?.reps ?? prev?.reps ?? '',
+        });
+      }
+    });
+    return result;
+  }, [daySets, lastSetsForExercise]);
+
+  if (!dayPlan) {
+    // Past day 56
+    const start = new Date(profile.blockStartDate + 'T00:00:00');
+    const sel = new Date(selectedDate + 'T00:00:00');
+    const dayIndex = Math.round((sel - start) / 86400000);
+    return (
+      <div style={{ maxWidth: 600, margin: '0 auto', padding: 16 }}>
+        <div className="dashboard-card" style={{ padding: 24, textAlign: 'center' }}>
+          <h2 style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginBottom: 8 }}>Block {profile.blockNumber} Complete!</h2>
+          <p style={{ color: '#94A3B8', fontSize: 14, marginBottom: 16 }}>
+            {dayIndex >= 56 ? "You've finished all 56 days. Ready for the next block?" : "This date is before your block start."}
+          </p>
+          {dayIndex >= 56 && (
+            <button onClick={async () => {
+              const newProfile = {
+                ...profile,
+                blockNumber: profile.blockNumber + 1,
+                blockStartDate: todayStr,
+                updatedAt: new Date().toISOString(),
+              };
+              await saveEngineProfile(user.uid, newProfile);
+              onDataChange();
+            }} className="btn btn-primary" style={{ padding: '12px 32px', fontSize: 16 }}>
+              Start Block {profile.blockNumber + 1}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const strengthExercises = dayPlan.strength !== 'rest' ? STRENGTH_TEMPLATES[dayPlan.strength] : [];
+  const strengthLog = dayLogs.find(l => l.sessionType === dayPlan.strength);
+
+  // Notes state
+  const [strengthNote, setStrengthNote] = useState(strengthLog?.note || '');
+  const [cardioNotes, setCardioNotes] = useState({});
+
+  const dayName = new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+
+  // Determine block day number
+  const startD = new Date(profile.blockStartDate + 'T00:00:00');
+  const selD = new Date(selectedDate + 'T00:00:00');
+  const blockDayNum = Math.round((selD - startD) / 86400000) + 1;
+
+  return (
+    <div style={{ maxWidth: 600, margin: '0 auto', padding: isMobile ? '0 4px' : 0 }}>
+      {/* Date header */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+        <div>
+          <h2 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 700, color: '#E2E8F0' }}>{dayName}</h2>
+          <span style={{ color: '#94A3B8', fontSize: 13 }}>Block {profile.blockNumber} — Day {blockDayNum} / 56 — Week {dayPlan.week}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => {
+            const d = new Date(selectedDate + 'T12:00:00');
+            d.setDate(d.getDate() - 1);
+            setSelectedDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+          }} className="btn btn-ghost" style={{ padding: '6px 12px' }} aria-label="Previous day">{'\u2190'}</button>
+          <button onClick={() => setSelectedDate(todayStr)} className="btn btn-ghost" style={{ padding: '6px 12px', fontSize: 12 }}>Today</button>
+          <button onClick={() => {
+            const d = new Date(selectedDate + 'T12:00:00');
+            d.setDate(d.getDate() + 1);
+            setSelectedDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+          }} className="btn btn-ghost" style={{ padding: '6px 12px' }} aria-label="Next day">{'\u2192'}</button>
+        </div>
+      </div>
+
+      {/* Session type badges */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+        {dayPlan.strength !== 'rest' && (
+          <span style={{ background: `${ENGINE_COLORS[dayPlan.strength]}20`, color: ENGINE_COLORS[dayPlan.strength], padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+            {dayPlan.strength.toUpperCase()}
+          </span>
+        )}
+        {dayPlan.cardio.map((c, i) => (
+          <span key={i} style={{ background: `${ENGINE_COLORS[c.type]}20`, color: ENGINE_COLORS[c.type], padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>
+            {c.type === 'walk' ? 'WALK' : `INTERVALS ${c.slot || ''}`}
+          </span>
+        ))}
+        {dayPlan.strength === 'rest' && dayPlan.cardio.length === 0 && (
+          <span style={{ background: '#37415120', color: '#94A3B8', padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>REST</span>
+        )}
+        {dayPlan.isBenchmark && (
+          <span style={{ background: `${ENGINE_COLORS.benchmark}20`, color: ENGINE_COLORS.benchmark, padding: '4px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600 }}>BENCHMARK</span>
+        )}
+      </div>
+
+      {/* Strength card */}
+      {strengthExercises.length > 0 && (
+        <EngineStrengthCard
+          sessionType={dayPlan.strength}
+          exercises={strengthExercises}
+          existingSets={prefillSets(strengthExercises)}
+          completed={!!strengthLog?.completed}
+          note={strengthNote}
+          onNoteChange={setStrengthNote}
+          onSaveSets={async (sets) => {
+            await saveStrengthSets(user.uid, selectedDate, null, []);
+            // Save each exercise's sets
+            for (const ex of strengthExercises) {
+              const exSets = sets.filter(s => s.exerciseName === ex.name);
+              if (exSets.length > 0) {
+                await saveStrengthSets(user.uid, selectedDate, ex.name, exSets);
+              }
+            }
+            await saveWorkoutLog(user.uid, { logDate: selectedDate, sessionType: dayPlan.strength, completed: true, note: strengthNote });
+            onDataChange();
+          }}
+          onToggleComplete={async (val) => {
+            await saveWorkoutLog(user.uid, { logDate: selectedDate, sessionType: dayPlan.strength, completed: val, note: strengthNote });
+            onDataChange();
+          }}
+        />
+      )}
+
+      {/* Cardio cards */}
+      {dayPlan.cardio.map((c, i) => {
+        const cardioLog = dayLogs.find(l => l.sessionType === c.type && (c.type === 'walk' || l.sessionSlot === c.slot));
+        return (
+          <EngineCardioCard
+            key={i}
+            cardioItem={c}
+            zones={zones}
+            completed={!!cardioLog?.completed}
+            note={cardioNotes[`${c.type}_${c.slot || ''}`] || cardioLog?.note || ''}
+            onNoteChange={(val) => setCardioNotes(prev => ({ ...prev, [`${c.type}_${c.slot || ''}`]: val }))}
+            onToggleComplete={async (val) => {
+              await saveWorkoutLog(user.uid, {
+                logDate: selectedDate, sessionType: c.type,
+                sessionSlot: c.slot || null, completed: val,
+                note: cardioNotes[`${c.type}_${c.slot || ''}`] || '',
+              });
+              onDataChange();
+            }}
+          />
+        );
+      })}
+
+      {/* Rest day message */}
+      {dayPlan.strength === 'rest' && dayPlan.cardio.length === 0 && (
+        <div className="dashboard-card" style={{ padding: 24, textAlign: 'center', marginBottom: 16, borderLeft: '3px solid #374151' }}>
+          <div style={{ fontSize: 28, marginBottom: 8 }}>{'\uD83D\uDCA4'}</div>
+          <h3 style={{ color: '#94A3B8', fontSize: 16, fontWeight: 600 }}>Rest Day</h3>
+          <p style={{ color: '#94A3B8', fontSize: 13 }}>Recovery is when you grow. Stay hydrated.</p>
+        </div>
+      )}
+
+      {/* Daily check-in */}
+      <EngineCheckinCard
+        checkin={dayCheckin}
+        onSave={async (data) => {
+          await saveCheckin(user.uid, { checkinDate: selectedDate, ...data });
+          onDataChange();
+        }}
+      />
+
+      {/* Benchmark card */}
+      {dayPlan.isBenchmark && (
+        <EngineBenchmarkCard
+          existing={testResults.find(t => t.testDate === selectedDate)}
+          blockNumber={profile.blockNumber}
+          onSave={async (data) => {
+            await saveTestResult(user.uid, data);
+            onDataChange();
+          }}
+        />
+      )}
+
+      {/* HR Zones reference */}
+      <div className="dashboard-card" style={{ padding: 16, marginBottom: 16 }}>
+        <h4 style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>Heart Rate Zones</h4>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <span style={{ background: 'rgba(20,184,166,0.15)', color: '#14B8A6', padding: '4px 10px', borderRadius: 8, fontSize: 12 }}>Easy: {zones.easy.low}-{zones.easy.high}</span>
+          <span style={{ background: 'rgba(59,130,246,0.15)', color: '#3B82F6', padding: '4px 10px', borderRadius: 8, fontSize: 12 }}>Mod: {zones.moderate.low}-{zones.moderate.high}</span>
+          <span style={{ background: 'rgba(239,68,68,0.15)', color: '#EF4444', padding: '4px 10px', borderRadius: 8, fontSize: 12 }}>Hard: {zones.hard.low}+</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Engine Calendar View ───────────────────────────────────
+function EngineCalendarView({ profile, workoutLogs, onSelectDate }) {
+  const isMobile = useIsMobile();
+  const fullPlan = useMemo(() => generateFullBlockPlan(profile.blockNumber), [profile.blockNumber]);
+  const startDate = new Date(profile.blockStartDate + 'T00:00:00');
+
+  const completedSet = useMemo(() => {
+    const s = new Set();
+    workoutLogs.filter(l => l.completed).forEach(l => {
+      s.add(`${l.logDate}_${l.sessionType}${l.sessionSlot ? '_' + l.sessionSlot : ''}`);
+    });
+    return s;
+  }, [workoutLogs]);
+
+  const todayStr = (() => { const t = new Date(); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`; })();
+
+  return (
+    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginBottom: 16 }}>
+        Block {profile.blockNumber} — 8-Week Calendar
+      </h2>
+
+      {[1, 2, 3, 4, 5, 6, 7, 8].map(week => {
+        const weekDays = fullPlan.filter(d => d.week === week);
+        return (
+          <div key={week} style={{ marginBottom: 12 }}>
+            <div style={{ color: '#94A3B8', fontSize: 12, fontWeight: 600, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>
+              Week {week}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${weekDays.length}, 1fr)`, gap: isMobile ? 4 : 8 }}>
+              {weekDays.map(day => {
+                const date = new Date(startDate);
+                date.setDate(date.getDate() + day.dayIndex);
+                const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+                const isToday = dateStr === todayStr;
+                const dayLabel = date.getDate();
+                const dayAbbr = ['S', 'M', 'T', 'W', 'T', 'F', 'S'][date.getDay()];
+
+                // Collect session markers
+                const markers = [];
+                if (day.strength !== 'rest') {
+                  const done = completedSet.has(`${dateStr}_${day.strength}`);
+                  markers.push({ color: ENGINE_COLORS[day.strength], done, label: day.strength[0].toUpperCase() });
+                }
+                day.cardio.forEach(c => {
+                  const key = `${dateStr}_${c.type}${c.slot ? '_' + c.slot : ''}`;
+                  const done = completedSet.has(key);
+                  markers.push({ color: ENGINE_COLORS[c.type], done, label: c.type === 'walk' ? 'W' : 'I' });
+                });
+                if (day.isBenchmark) {
+                  markers.push({ color: ENGINE_COLORS.benchmark, done: false, label: 'B' });
+                }
+
+                return (
+                  <button key={day.dayIndex} onClick={() => onSelectDate(dateStr)}
+                    style={{
+                      background: isToday ? 'rgba(59,130,246,0.15)' : '#1A1F35',
+                      border: isToday ? '2px solid #3B82F6' : '1px solid #252B45',
+                      borderRadius: 10, padding: isMobile ? '6px 2px' : '8px 4px',
+                      cursor: 'pointer', textAlign: 'center', minHeight: isMobile ? 60 : 72,
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-start', gap: 4,
+                    }}
+                    aria-label={`${dayAbbr} ${dayLabel}, ${markers.map(m => m.label).join(' ')}`}
+                  >
+                    <div style={{ color: '#94A3B8', fontSize: 10 }}>{dayAbbr}</div>
+                    <div style={{ color: '#E2E8F0', fontSize: isMobile ? 13 : 15, fontWeight: 600 }}>{dayLabel}</div>
+                    <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {markers.map((m, i) => (
+                        <div key={i} style={{
+                          width: isMobile ? 8 : 10, height: isMobile ? 8 : 10, borderRadius: '50%',
+                          background: m.done ? m.color : 'transparent',
+                          border: `2px solid ${m.color}`,
+                        }} title={`${m.label}: ${m.done ? 'done' : 'planned'}`} />
+                      ))}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Engine Progress View ───────────────────────────────────
+function EngineProgressView({ profile, workoutLogs, strengthSets, checkins, testResults }) {
+  const isMobile = useIsMobile();
+  const [selectedExercise, setSelectedExercise] = useState('');
+  const fullPlan = useMemo(() => generateFullBlockPlan(profile.blockNumber), [profile.blockNumber]);
+
+  // All unique exercise names
+  const exerciseNames = useMemo(() => {
+    const names = new Set();
+    strengthSets.forEach(s => names.add(s.exerciseName));
+    return [...names].sort();
+  }, [strengthSets]);
+
+  // Resting HR over time
+  const rhrData = useMemo(() =>
+    checkins
+      .filter(c => c.restingHR)
+      .map(c => ({ date: c.checkinDate, rhr: c.restingHR }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+  [checkins]);
+
+  // Feel over time
+  const feelData = useMemo(() =>
+    checkins
+      .filter(c => c.feelRating)
+      .map(c => ({ date: c.checkinDate, feel: c.feelRating }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+  [checkins]);
+
+  // Benchmark results
+  const benchData = useMemo(() =>
+    testResults
+      .map(t => ({ date: t.testDate, distance: t.distance, unit: t.distanceUnit, rhr: t.restingHR, block: t.blockNumber }))
+      .sort((a, b) => a.date.localeCompare(b.date)),
+  [testResults]);
+
+  // Weight progression for selected exercise
+  const weightData = useMemo(() => {
+    if (!selectedExercise) return [];
+    const byDate = {};
+    strengthSets
+      .filter(s => s.exerciseName === selectedExercise)
+      .forEach(s => {
+        if (!byDate[s.logDate] || s.weight > byDate[s.logDate].weight) {
+          byDate[s.logDate] = { date: s.logDate, weight: s.weight, reps: s.reps };
+        }
+      });
+    return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+  }, [strengthSets, selectedExercise]);
+
+  // Weekly adherence
+  const adherenceData = useMemo(() => {
+    const startDate = new Date(profile.blockStartDate + 'T00:00:00');
+    const completedSet = new Set();
+    workoutLogs.filter(l => l.completed).forEach(l => {
+      completedSet.add(`${l.logDate}_${l.sessionType}${l.sessionSlot ? '_' + l.sessionSlot : ''}`);
+    });
+
+    return [1, 2, 3, 4, 5, 6, 7, 8].map(week => {
+      const weekDays = fullPlan.filter(d => d.week === week);
+      let planned = 0, done = 0;
+      weekDays.forEach(day => {
+        const date = new Date(startDate);
+        date.setDate(date.getDate() + day.dayIndex);
+        const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        if (day.strength !== 'rest') {
+          planned++;
+          if (completedSet.has(`${dateStr}_${day.strength}`)) done++;
+        }
+        day.cardio.forEach(c => {
+          planned++;
+          const key = `${dateStr}_${c.type}${c.slot ? '_' + c.slot : ''}`;
+          if (completedSet.has(key)) done++;
+        });
+      });
+      return { week: `Wk ${week}`, pct: planned > 0 ? Math.round((done / planned) * 100) : 0, done, planned };
+    });
+  }, [fullPlan, workoutLogs, profile]);
+
+  const formatDate = (d) => { const p = d.split('-'); return `${parseInt(p[1])}/${parseInt(p[2])}`; };
+
+  return (
+    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginBottom: 20 }}>Progress</h2>
+
+      {/* Resting Heart Rate */}
+      <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 20 }}>
+        <h3 style={{ color: '#8B5CF6', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Resting Heart Rate</h3>
+        {rhrData.length > 1 ? (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={rhrData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+              <XAxis dataKey="date" tick={{ fill: '#94A3B8', fontSize: 11 }} tickFormatter={formatDate} />
+              <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} domain={['auto', 'auto']} />
+              <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #374151', borderRadius: 8 }} labelStyle={{ color: '#94A3B8' }} />
+              <Line type="monotone" dataKey="rhr" stroke="#8B5CF6" strokeWidth={2} dot={{ fill: '#8B5CF6', r: 3 }} name="RHR (bpm)" />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p style={{ color: '#94A3B8', fontSize: 13 }}>Log at least 2 check-ins to see your trend.</p>
+        )}
+      </div>
+
+      {/* How You Feel */}
+      <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 20 }}>
+        <h3 style={{ color: '#14B8A6', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>How You Feel</h3>
+        {feelData.length > 1 ? (
+          <ResponsiveContainer width="100%" height={160}>
+            <AreaChart data={feelData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+              <XAxis dataKey="date" tick={{ fill: '#94A3B8', fontSize: 11 }} tickFormatter={formatDate} />
+              <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} />
+              <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #374151', borderRadius: 8 }} />
+              <Area type="monotone" dataKey="feel" stroke="#14B8A6" fill="rgba(20,184,166,0.2)" strokeWidth={2} name="Feel (1-5)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        ) : (
+          <p style={{ color: '#94A3B8', fontSize: 13 }}>Log at least 2 check-ins to see your trend.</p>
+        )}
+      </div>
+
+      {/* Benchmark Results */}
+      <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 20 }}>
+        <h3 style={{ color: ENGINE_COLORS.benchmark, fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Benchmark Tests</h3>
+        {benchData.length > 0 ? (
+          <div>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={benchData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+                <XAxis dataKey="date" tick={{ fill: '#94A3B8', fontSize: 11 }} tickFormatter={formatDate} />
+                <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} />
+                <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #374151', borderRadius: 8 }} />
+                <Bar dataKey="distance" fill={ENGINE_COLORS.benchmark} name="Distance" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="rhr" fill="#8B5CF6" name="RHR (bpm)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p style={{ color: '#94A3B8', fontSize: 13 }}>Complete a benchmark test to see results.</p>
+        )}
+      </div>
+
+      {/* Weight Progression */}
+      <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 20 }}>
+        <h3 style={{ color: '#3B82F6', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Weight Progression</h3>
+        <select className="select" style={{ marginBottom: 12, maxWidth: 280 }} value={selectedExercise} onChange={e => setSelectedExercise(e.target.value)} aria-label="Select exercise">
+          <option value="">Select an exercise...</option>
+          {exerciseNames.map(n => <option key={n} value={n}>{n}</option>)}
+        </select>
+        {weightData.length > 1 ? (
+          <ResponsiveContainer width="100%" height={200}>
+            <LineChart data={weightData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+              <XAxis dataKey="date" tick={{ fill: '#94A3B8', fontSize: 11 }} tickFormatter={formatDate} />
+              <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} />
+              <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #374151', borderRadius: 8 }} />
+              <Line type="monotone" dataKey="weight" stroke="#3B82F6" strokeWidth={2} dot={{ fill: '#3B82F6', r: 3 }} name="Weight (lbs)" />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : (
+          <p style={{ color: '#94A3B8', fontSize: 13 }}>{selectedExercise ? 'Log at least 2 sessions to see your progression.' : 'Pick an exercise above.'}</p>
+        )}
+      </div>
+
+      {/* Weekly Adherence */}
+      <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 20 }}>
+        <h3 style={{ color: '#00B894', fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Weekly Adherence</h3>
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={adherenceData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#252B45" />
+            <XAxis dataKey="week" tick={{ fill: '#94A3B8', fontSize: 11 }} />
+            <YAxis tick={{ fill: '#94A3B8', fontSize: 11 }} domain={[0, 100]} />
+            <Tooltip contentStyle={{ background: '#1A1F35', border: '1px solid #374151', borderRadius: 8 }} formatter={(v) => `${v}%`} />
+            <Bar dataKey="pct" fill="#00B894" name="Adherence" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+// ─── Engine Module (Root Component) ─────────────────────────
+function EngineModule({ user }) {
+  const isMobile = useIsMobile();
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState('today');
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  });
+  const [workoutLogs, setWorkoutLogs] = useState([]);
+  const [strengthSets, setStrengthSetsState] = useState([]);
+  const [checkins, setCheckinsState] = useState([]);
+  const [testResults, setTestResultsState] = useState([]);
+
+  const loadAllData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    const [p, wl, ss, ci, tr] = await Promise.all([
+      loadEngineProfile(user.uid),
+      loadWorkoutLogs(user.uid),
+      loadStrengthSets(user.uid),
+      loadCheckins(user.uid),
+      loadTestResults(user.uid),
+    ]);
+    setProfile(p);
+    setWorkoutLogs(wl);
+    setStrengthSetsState(ss);
+    setCheckinsState(ci);
+    setTestResultsState(tr);
+    setLoading(false);
+  }, [user]);
+
+  useEffect(() => { loadAllData(); }, [loadAllData]);
+
+  if (!user) {
+    return (
+      <div style={{ textAlign: 'center', padding: 48 }}>
+        <p style={{ color: '#94A3B8', fontSize: 16 }}>Sign in to access Engine.</p>
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: 'center', padding: 48 }}>
+        <p style={{ color: '#94A3B8', fontSize: 14 }}>Loading Engine...</p>
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <EngineSetup onComplete={async (data) => {
+        await saveEngineProfile(user.uid, { ...data, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+        loadAllData();
+      }} />
+    );
+  }
+
+  // Sub-nav for Engine views
+  const views = [
+    { id: 'today', label: 'Today' },
+    { id: 'calendar', label: 'Calendar' },
+    { id: 'progress', label: 'Progress' },
+  ];
+
+  return (
+    <div>
+      {/* Engine sub-nav */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, background: '#1A1F35', borderRadius: 10, padding: 4, maxWidth: 360 }}>
+        {views.map(v => (
+          <button key={v.id} onClick={() => setView(v.id)}
+            style={{
+              flex: 1, padding: '8px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              background: view === v.id ? '#3B82F6' : 'transparent',
+              color: view === v.id ? 'white' : '#94A3B8',
+              fontSize: 13, fontWeight: 600, transition: 'all 150ms',
+            }}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {view === 'today' && (
+        <EngineTodayView
+          profile={profile} workoutLogs={workoutLogs} strengthSets={strengthSets}
+          checkins={checkins} testResults={testResults} user={user}
+          onDataChange={loadAllData}
+          selectedDate={selectedDate} setSelectedDate={setSelectedDate}
+        />
+      )}
+      {view === 'calendar' && (
+        <EngineCalendarView
+          profile={profile} workoutLogs={workoutLogs}
+          onSelectDate={(dateStr) => { setSelectedDate(dateStr); setView('today'); }}
+        />
+      )}
+      {view === 'progress' && (
+        <EngineProgressView
+          profile={profile} workoutLogs={workoutLogs} strengthSets={strengthSets}
+          checkins={checkins} testResults={testResults}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── App ──────────────────────────────────────────────────────
 function App() {
   const isMobile = useIsMobile();
@@ -1778,6 +2959,7 @@ function App() {
   const [collapsed, setCollapsed] = useState(new Set());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // idle | syncing | synced | error
+  const [activeTab, setActiveTab] = useState('habits'); // habits | engine
 
   const { user, loading: authLoading, signIn, signOut } = useAuth();
   const prevUserRef = useRef(null);
@@ -2084,17 +3266,39 @@ function App() {
 
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto', padding: isMobile ? '8px 6px' : '24px 16px' }}>
-      <Header month={month} year={year} setMonth={setMonth} setYear={setYear} overallPct={overallPct} onOpenSettings={() => setSettingsOpen(true)} user={user} onSignIn={signIn} syncStatus={syncStatus} />
-      <DashboardCards totalDone={totalDone} totalPossible={totalPossible} bestStreak={bestStreak} todayScore={todayScore} todayTotal={todayTotal} />
-      <DailyChart dailyData={dailyData} />
-      <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} month={month} year={year} />
-      <GoalsPanel goals={goals} setGoals={setGoals} />
-      <MetricsDashboard config={config} metrics={metrics} />
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(400px, 1fr))', gap: isMobile ? 12 : 24 }}>
-        <WeeklySummary weeklyData={weeklyData} />
-        <Journal journal={journal} setJournal={setJournal} />
+      <Header month={month} year={year} setMonth={setMonth} setYear={setYear} overallPct={overallPct} onOpenSettings={() => setSettingsOpen(true)} user={user} onSignIn={signIn} syncStatus={syncStatus} activeTab={activeTab} />
+
+      {/* Tab bar */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: isMobile ? 12 : 20, background: '#1A1F35', borderRadius: 12, padding: 4, maxWidth: 280 }}>
+        <button onClick={() => setActiveTab('habits')}
+          style={{ flex: 1, padding: '10px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', background: activeTab === 'habits' ? '#3B82F6' : 'transparent', color: activeTab === 'habits' ? 'white' : '#94A3B8', fontSize: 14, fontWeight: 700, letterSpacing: 1, transition: 'all 150ms' }}>
+          HABITS
+        </button>
+        <button onClick={() => setActiveTab('engine')}
+          style={{ flex: 1, padding: '10px 20px', borderRadius: 10, border: 'none', cursor: 'pointer', background: activeTab === 'engine' ? '#3B82F6' : 'transparent', color: activeTab === 'engine' ? 'white' : '#94A3B8', fontSize: 14, fontWeight: 700, letterSpacing: 1, transition: 'all 150ms' }}>
+          ENGINE
+        </button>
       </div>
-      <Leaderboard config={config} habitStats={habitStats} />
+
+      {activeTab === 'habits' && (
+        <>
+          <DashboardCards totalDone={totalDone} totalPossible={totalPossible} bestStreak={bestStreak} todayScore={todayScore} todayTotal={todayTotal} />
+          <DailyChart dailyData={dailyData} />
+          <HabitGrid config={config} checks={checks} metrics={metrics} toggleCheck={toggleCheck} setMetric={setMetric} collapsed={collapsed} toggleCollapse={toggleCollapse} daysInMonth={daysInMonth} habitStats={habitStats} month={month} year={year} />
+          <GoalsPanel goals={goals} setGoals={setGoals} />
+          <MetricsDashboard config={config} metrics={metrics} />
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(400px, 1fr))', gap: isMobile ? 12 : 24 }}>
+            <WeeklySummary weeklyData={weeklyData} />
+            <Journal journal={journal} setJournal={setJournal} />
+          </div>
+          <Leaderboard config={config} habitStats={habitStats} />
+        </>
+      )}
+
+      {activeTab === 'engine' && (
+        <EngineModule user={user} />
+      )}
+
       <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} config={config} setConfig={setConfig} user={user} onSignOut={signOut} />
       <div style={{ textAlign: 'center', padding: '24px 0', color: '#94A3B8', fontSize: 12 }}>
         Daily Disciplines v2 — Built for consistency, not perfection.
