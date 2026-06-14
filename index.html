@@ -2451,16 +2451,45 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
   // Reset manual override when date changes
   useEffect(() => { setManualStrength(null); setShowPicker(false); }, [selectedDate]);
 
-  // What strength to show (manual override or suggestion)
-  const activeStrength = manualStrength || (suggestion.suggestions.find(s => ['push', 'pull', 'legs'].includes(s.type))?.type);
-  const todayStrengthDone = suggestion.todayLogs.find(l => ['push', 'pull', 'legs'].includes(l.sessionType));
-
   // Existing data for selected date
   const dayLogs = workoutLogs.filter(l => l.logDate === selectedDate);
   const daySets = strengthSets.filter(s => s.logDate === selectedDate);
   const dayCheckin = checkins.find(c => c.checkinDate === selectedDate);
 
-  // Prefill from last session
+  // Did a strength session already get logged on this date?
+  const loggedStrengthSession = dayLogs.find(l => ['push', 'pull', 'legs'].includes(l.sessionType) && l.completed);
+
+  // What strength type to show: logged session > manual override > suggestion
+  const activeStrength = loggedStrengthSession?.sessionType || manualStrength || (suggestion.suggestions.find(s => ['push', 'pull', 'legs'].includes(s.type))?.type);
+  const isCompleted = !!loggedStrengthSession?.completed;
+
+  // Build exercise list: if we have logged sets for this date, reconstruct from actual data; otherwise use template
+  const exercisesForCard = useMemo(() => {
+    if (daySets.length > 0 && activeStrength) {
+      // Reconstruct exercises from what was actually saved
+      const exMap = {};
+      daySets.forEach(s => {
+        if (!exMap[s.exerciseName]) exMap[s.exerciseName] = { name: s.exerciseName, sets: 0, repsRange: '' };
+        exMap[s.exerciseName].sets = Math.max(exMap[s.exerciseName].sets, s.setIndex + 1);
+      });
+      const fromData = Object.values(exMap);
+      // If template exists, merge: keep template order/repsRange but add any custom exercises
+      if (STRENGTH_TEMPLATES[activeStrength]) {
+        const templateNames = new Set(STRENGTH_TEMPLATES[activeStrength].map(e => e.name));
+        const fromTemplate = STRENGTH_TEMPLATES[activeStrength].map(e => {
+          const saved = exMap[e.name];
+          return saved ? { ...e, sets: Math.max(e.sets, saved.sets) } : e;
+        });
+        // Add any custom exercises not in template
+        const custom = fromData.filter(e => !templateNames.has(e.name));
+        return [...fromTemplate, ...custom];
+      }
+      return fromData;
+    }
+    return activeStrength && STRENGTH_TEMPLATES[activeStrength] ? STRENGTH_TEMPLATES[activeStrength] : [];
+  }, [daySets, activeStrength]);
+
+  // Prefill sets from saved data for this date + fallback to previous sessions
   const prefillSets = useCallback((exercises) => {
     return exercises.flatMap(ex => {
       const past = strengthSets
@@ -2470,7 +2499,12 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
       for (let s = 0; s < ex.sets; s++) {
         const existing = daySets.find(es => es.exerciseName === ex.name && es.setIndex === s);
         const prev = past.find(p => p.setIndex === s);
-        result.push({ exerciseName: ex.name, setIndex: s, weight: existing?.weight ?? prev?.weight ?? '', reps: existing?.reps ?? prev?.reps ?? '' });
+        result.push({
+          exerciseName: ex.name, setIndex: s,
+          weight: existing?.weight ?? prev?.weight ?? '',
+          reps: existing?.reps ?? prev?.reps ?? '',
+          failure: existing?.failure || false,
+        });
       }
       return result;
     });
@@ -2484,8 +2518,8 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
   // Check benchmark week
   const isBenchmarkWeek = weekData.benchmark;
 
-  // Strength notes
-  const strengthLog = dayLogs.find(l => l.sessionType === activeStrength);
+  // Strength notes — prefer the logged session's note
+  const strengthLog = loggedStrengthSession || dayLogs.find(l => l.sessionType === activeStrength);
   const [strengthNote, setStrengthNote] = useState(strengthLog?.note || '');
   const [cardioNotes, setCardioNotes] = useState({});
 
@@ -2559,12 +2593,13 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
       </div>
 
       {/* Strength card */}
-      {activeStrength && activeStrength !== 'rest' && activeStrength !== 'skip' && STRENGTH_TEMPLATES[activeStrength] && (
+      {activeStrength && activeStrength !== 'rest' && activeStrength !== 'skip' && exercisesForCard.length > 0 && (
         <FPStrengthCard
+          key={selectedDate + '_' + activeStrength}
           sessionType={activeStrength}
-          exercises={STRENGTH_TEMPLATES[activeStrength]}
-          existingSets={prefillSets(STRENGTH_TEMPLATES[activeStrength])}
-          completed={!!todayStrengthDone?.completed || !!strengthLog?.completed}
+          exercises={exercisesForCard}
+          existingSets={prefillSets(exercisesForCard)}
+          completed={isCompleted}
           note={strengthNote}
           onNoteChange={setStrengthNote}
           onSaveSets={async (sets, localExercises) => {
@@ -2594,18 +2629,33 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
         </div>
       )}
 
-      {/* Cardio cards — show suggestions based on what's still needed */}
+      {/* Cardio cards — show logged sessions first, then suggestions */}
       {manualStrength !== 'rest' && (() => {
-        const cardioSuggestions = suggestion.suggestions.filter(s => s.type === 'interval' || s.type === 'walk');
-        if (cardioSuggestions.length === 0 && suggestion.weekStats.walks >= weekData.walks.target && suggestion.weekStats.intervals >= weekData.intervals.length) {
+        // Logged cardio for this date
+        const loggedCardio = dayLogs.filter(l => (l.sessionType === 'walk' || l.sessionType === 'interval'));
+        // Suggestion-based cardio (only for sessions not already logged)
+        const cardioSuggestions = suggestion.suggestions.filter(s =>
+          (s.type === 'interval' || s.type === 'walk') &&
+          !loggedCardio.some(lc => lc.sessionType === s.type && (s.type === 'walk' || lc.sessionSlot === s.slot))
+        );
+        // Merge: logged first, then new suggestions
+        const allCardio = [
+          ...loggedCardio.map(lc => ({ type: lc.sessionType, slot: lc.sessionSlot, protocol: lc.sessionType === 'interval' ? (lc.note || 'Intervals') : null, duration: lc.sessionType === 'walk' ? weekData.walks.duration : null, logged: true, log: lc })),
+          ...cardioSuggestions.map(cs => ({ ...cs, logged: false })),
+        ];
+
+        if (allCardio.length === 0 && suggestion.weekStats.walks >= weekData.walks.target && suggestion.weekStats.intervals >= weekData.intervals.length) {
           return <div style={{ color: '#94A3B8', fontSize: 13, marginBottom: 16, padding: '8px 12px', background: '#1A1F35', borderRadius: 8 }}>Cardio targets met for this week!</div>;
         }
-        return cardioSuggestions.map((cs, i) => {
-          const cardioLog = dayLogs.find(l => l.sessionType === cs.type && l.completed);
+        return allCardio.map((cs, i) => {
+          const cardioLog = cs.logged ? cs.log : dayLogs.find(l => l.sessionType === cs.type && l.completed);
           return (
-            <FPCardioCard key={i} cardioType={cs.type} protocol={cs.protocol} duration={cs.duration} slot={cs.slot} zones={zones}
+            <FPCardioCard key={`${cs.type}_${cs.slot || ''}_${i}`} cardioType={cs.type}
+              protocol={cs.protocol || (cs.type === 'interval' ? weekData.intervals[0]?.protocol : null)}
+              duration={cs.duration || weekData.walks.duration}
+              slot={cs.slot} zones={zones}
               completed={!!cardioLog?.completed}
-              note={cardioNotes[`${cs.type}_${cs.slot || ''}`] || cardioLog?.note || ''}
+              note={cardioNotes[`${cs.type}_${cs.slot || ''}`] ?? cardioLog?.note ?? ''}
               onNoteChange={(val) => setCardioNotes(prev => ({ ...prev, [`${cs.type}_${cs.slot || ''}`]: val }))}
               onToggleComplete={async (val) => {
                 await saveWorkoutLog(user.uid, { logDate: selectedDate, sessionType: cs.type, sessionSlot: cs.slot || null, completed: val, note: cardioNotes[`${cs.type}_${cs.slot || ''}`] || '' });
