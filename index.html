@@ -1999,7 +1999,7 @@ async function saveStrengthSets(uid, logDate, exerciseName, sets) {
   try {
     for (const s of sets) {
       const docId = `${logDate}_${exerciseName}_${s.setIndex}`;
-      await engineStrengthSetsRef(uid).doc(docId).set({ userId: uid, logDate, exerciseName, setIndex: s.setIndex, weight: s.weight, reps: s.reps }, { merge: true });
+      await engineStrengthSetsRef(uid).doc(docId).set({ userId: uid, logDate, exerciseName, setIndex: s.setIndex, weight: s.weight, reps: s.reps, failure: !!s.failure }, { merge: true });
     }
   } catch (e) { console.error(e); }
 }
@@ -2105,35 +2105,96 @@ function FitnessSetup({ onComplete }) {
 // ─── Strength Card ──────────────────────────────────────────
 function FPStrengthCard({ sessionType, exercises, existingSets, onSaveSets, completed, note, onNoteChange }) {
   const isMobile = useIsMobile();
+
+  // Local exercise list (editable names, add/remove)
+  const [localExercises, setLocalExercises] = useState(() =>
+    exercises.map(ex => ({ ...ex, displayName: ex.name }))
+  );
+
+  // Local sets with failure flag
   const [localSets, setLocalSets] = useState(() => {
     const init = {};
     exercises.forEach(ex => {
       init[ex.name] = [];
       for (let s = 0; s < ex.sets; s++) {
         const existing = existingSets.find(es => es.exerciseName === ex.name && es.setIndex === s);
-        init[ex.name].push({ setIndex: s, weight: existing ? existing.weight : '', reps: existing ? existing.reps : '' });
+        init[ex.name].push({ setIndex: s, weight: existing ? existing.weight : '', reps: existing ? existing.reps : '', failure: existing?.failure || false });
       }
     });
     return init;
   });
 
-  const updateSet = (exName, setIdx, field, value) => {
+  const [editingName, setEditingName] = useState(null); // key of exercise being renamed
+  const [showAddExercise, setShowAddExercise] = useState(false);
+  const [newExName, setNewExName] = useState('');
+
+  const updateSet = (exKey, setIdx, field, value) => {
     setLocalSets(prev => {
       const next = { ...prev };
-      next[exName] = [...next[exName]];
-      next[exName][setIdx] = { ...next[exName][setIdx], [field]: value };
+      next[exKey] = [...next[exKey]];
+      next[exKey][setIdx] = { ...next[exKey][setIdx], [field]: value };
       return next;
     });
   };
 
+  const addSet = (exKey) => {
+    setLocalSets(prev => {
+      const next = { ...prev };
+      const sets = [...(next[exKey] || [])];
+      sets.push({ setIndex: sets.length, weight: '', reps: '', failure: false });
+      next[exKey] = sets;
+      return next;
+    });
+  };
+
+  const removeExercise = (exKey) => {
+    setLocalExercises(prev => prev.filter(e => e.name !== exKey));
+    setLocalSets(prev => {
+      const next = { ...prev };
+      delete next[exKey];
+      return next;
+    });
+  };
+
+  const renameExercise = (oldKey, newName) => {
+    if (!newName.trim() || newName === oldKey) { setEditingName(null); return; }
+    setLocalExercises(prev => prev.map(e => e.name === oldKey ? { ...e, name: newName.trim(), displayName: newName.trim() } : e));
+    setLocalSets(prev => {
+      const next = { ...prev };
+      next[newName.trim()] = next[oldKey] || [];
+      delete next[oldKey];
+      return next;
+    });
+    setEditingName(null);
+  };
+
+  const addExercise = () => {
+    if (!newExName.trim()) return;
+    const name = newExName.trim();
+    setLocalExercises(prev => [...prev, { name, displayName: name, sets: 3, repsRange: '10-12' }]);
+    setLocalSets(prev => ({
+      ...prev,
+      [name]: [
+        { setIndex: 0, weight: '', reps: '', failure: false },
+        { setIndex: 1, weight: '', reps: '', failure: false },
+        { setIndex: 2, weight: '', reps: '', failure: false },
+      ],
+    }));
+    setNewExName('');
+    setShowAddExercise(false);
+  };
+
   const handleSave = () => {
     const allSets = [];
-    Object.entries(localSets).forEach(([exName, sets]) => {
-      sets.forEach(s => {
-        if (s.weight || s.reps) allSets.push({ exerciseName: exName, setIndex: s.setIndex, weight: parseFloat(s.weight) || 0, reps: parseInt(s.reps) || 0 });
+    localExercises.forEach(ex => {
+      (localSets[ex.name] || []).forEach(s => {
+        if (s.weight || s.reps) allSets.push({
+          exerciseName: ex.name, setIndex: s.setIndex,
+          weight: parseFloat(s.weight) || 0, reps: parseInt(s.reps) || 0, failure: !!s.failure,
+        });
       });
     });
-    onSaveSets(allSets);
+    onSaveSets(allSets, localExercises);
   };
 
   const color = FP_COLORS[sessionType];
@@ -2145,27 +2206,76 @@ function FPStrengthCard({ sessionType, exercises, existingSets, onSaveSets, comp
         {completed && <span style={{ color: '#00B894', fontSize: 20, fontWeight: 700 }}>{'\u2713'}</span>}
       </div>
 
-      {exercises.map(ex => (
-        <div key={ex.name} style={{ marginBottom: 14 }}>
-          <div style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-            {ex.name} <span style={{ color: '#94A3B8', fontWeight: 400 }}>{ex.sets}x{ex.repsRange}</span>
+      {localExercises.map(ex => (
+        <div key={ex.name} style={{ marginBottom: 14, background: '#1A1F3540', borderRadius: 10, padding: isMobile ? '10px 8px' : '10px 12px' }}>
+          {/* Exercise name — editable */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
+            {editingName === ex.name ? (
+              <input className="input" autoFocus style={{ fontSize: 13, fontWeight: 600, padding: '4px 8px', maxWidth: 240 }}
+                defaultValue={ex.name}
+                onBlur={e => renameExercise(ex.name, e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') renameExercise(ex.name, e.target.value); }}
+                aria-label="Rename exercise" />
+            ) : (
+              <span onClick={() => setEditingName(ex.name)} style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderBottom: '1px dashed #374151' }}
+                title="Click to rename">
+                {ex.displayName || ex.name}
+              </span>
+            )}
+            <span style={{ color: '#94A3B8', fontWeight: 400, fontSize: 12 }}>{ex.repsRange ? `${(localSets[ex.name] || []).length}x${ex.repsRange}` : ''}</span>
+            <button onClick={() => removeExercise(ex.name)} title="Remove exercise"
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#EF444480', cursor: 'pointer', fontSize: 14, padding: '2px 6px' }}>
+              {'\u2715'}
+            </button>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {localSets[ex.name]?.map((s, idx) => (
-              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#1A1F35', borderRadius: 8, padding: '4px 8px' }}>
-                <span style={{ color: '#94A3B8', fontSize: 11, minWidth: 14 }}>S{idx + 1}</span>
+
+          {/* Sets */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            {(localSets[ex.name] || []).map((s, idx) => (
+              <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: 3, background: '#1A1F35', borderRadius: 8, padding: '4px 6px' }}>
+                <span style={{ color: '#94A3B8', fontSize: 10, minWidth: 14 }}>S{idx + 1}</span>
                 <input type="number" inputMode="decimal" placeholder="lbs"
-                  style={{ width: 52, height: 36, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 6, textAlign: 'center', fontSize: 14, outline: 'none', padding: 0 }}
+                  style={{ width: 50, height: 36, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 6, textAlign: 'center', fontSize: 14, outline: 'none', padding: 0 }}
                   value={s.weight} onChange={e => updateSet(ex.name, idx, 'weight', e.target.value)} aria-label={`${ex.name} set ${idx + 1} weight`} />
-                <span style={{ color: '#94A3B8', fontSize: 11 }}>x</span>
+                <span style={{ color: '#94A3B8', fontSize: 10 }}>x</span>
                 <input type="number" inputMode="numeric" placeholder="reps"
-                  style={{ width: 44, height: 36, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 6, textAlign: 'center', fontSize: 14, outline: 'none', padding: 0 }}
+                  style={{ width: 42, height: 36, background: '#252B45', color: '#E2E8F0', border: '1px solid #374151', borderRadius: 6, textAlign: 'center', fontSize: 14, outline: 'none', padding: 0 }}
                   value={s.reps} onChange={e => updateSet(ex.name, idx, 'reps', e.target.value)} aria-label={`${ex.name} set ${idx + 1} reps`} />
+                <button onClick={() => updateSet(ex.name, idx, 'failure', !s.failure)} title={s.failure ? 'Pushed to failure' : 'Mark failure'}
+                  style={{
+                    width: 28, height: 28, borderRadius: 6, border: s.failure ? '2px solid #EF4444' : '1px solid #374151',
+                    background: s.failure ? 'rgba(239,68,68,0.2)' : '#252B45', color: s.failure ? '#EF4444' : '#374151',
+                    cursor: 'pointer', fontSize: 11, fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 0,
+                  }}
+                  aria-label={`${ex.name} set ${idx + 1} failure toggle`}>
+                  F
+                </button>
               </div>
             ))}
+            <button onClick={() => addSet(ex.name)} title="Add set"
+              style={{ width: 32, height: 32, borderRadius: 8, border: '1px dashed #374151', background: 'transparent', color: '#94A3B8', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              +
+            </button>
           </div>
         </div>
       ))}
+
+      {/* Add exercise */}
+      {showAddExercise ? (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <input className="input" style={{ fontSize: 13, padding: '6px 10px', flex: 1 }} placeholder="Exercise name"
+            value={newExName} onChange={e => setNewExName(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') addExercise(); }}
+            autoFocus aria-label="New exercise name" />
+          <button onClick={addExercise} className="btn btn-primary" style={{ padding: '6px 14px', fontSize: 12 }}>Add</button>
+          <button onClick={() => { setShowAddExercise(false); setNewExName(''); }} className="btn btn-ghost" style={{ padding: '6px 10px', fontSize: 12 }}>Cancel</button>
+        </div>
+      ) : (
+        <button onClick={() => setShowAddExercise(true)}
+          style={{ background: 'none', border: '1px dashed #374151', borderRadius: 8, padding: '8px 16px', color: '#94A3B8', cursor: 'pointer', fontSize: 12, width: '100%', marginBottom: 12 }}>
+          + Add Exercise
+        </button>
+      )}
 
       <textarea className="input" style={{ minHeight: 40, resize: 'vertical', fontSize: 13, marginBottom: 12 }}
         placeholder="Session notes (optional)" value={note || ''} onChange={e => onNoteChange(e.target.value)} aria-label="Session notes" />
@@ -2178,12 +2288,17 @@ function FPStrengthCard({ sessionType, exercises, existingSets, onSaveSets, comp
 }
 
 // ─── Cardio Card ────────────────────────────────────────────
-function FPCardioCard({ cardioType, protocol, duration, slot, zones, completed, note, onNoteChange, onToggleComplete }) {
+function FPCardioCard({ cardioType, protocol, duration, slot, zones, completed, note, onNoteChange, onToggleComplete, onDelete }) {
   const isMobile = useIsMobile();
   const isWalk = cardioType === 'walk';
   const color = isWalk ? FP_COLORS.walk : FP_COLORS.interval;
   const zone = isWalk ? zones.easy : zones.hard;
   const talkTest = isWalk ? 'Full sentences = right pace' : 'Only a few words between breaths';
+  const [editingProtocol, setEditingProtocol] = useState(false);
+  const [localProtocol, setLocalProtocol] = useState(isWalk ? duration : protocol);
+  const [dismissed, setDismissed] = useState(false);
+
+  if (dismissed) return null;
 
   return (
     <div className="dashboard-card" style={{ padding: isMobile ? 16 : 20, marginBottom: 16, borderLeft: `3px solid ${color}` }}>
@@ -2191,9 +2306,29 @@ function FPCardioCard({ cardioType, protocol, duration, slot, zones, completed, 
         <h3 style={{ fontSize: 16, fontWeight: 700, color }}>
           {isWalk ? 'Easy Walk' : `Intervals${slot ? ' (' + slot + ')' : ''}`}
         </h3>
-        {completed && <span style={{ color: '#00B894', fontSize: 20, fontWeight: 700 }}>{'\u2713'}</span>}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {completed && <span style={{ color: '#00B894', fontSize: 20, fontWeight: 700 }}>{'\u2713'}</span>}
+          <button onClick={() => setDismissed(true)} title="Skip / remove this session"
+            style={{ background: 'none', border: 'none', color: '#EF444480', cursor: 'pointer', fontSize: 14, padding: '2px 6px' }}>
+            {'\u2715'}
+          </button>
+        </div>
       </div>
-      <div style={{ color: '#E2E8F0', fontSize: 14, marginBottom: 8 }}>{isWalk ? duration : protocol}</div>
+
+      {/* Editable protocol */}
+      {editingProtocol ? (
+        <input className="input" style={{ fontSize: 14, marginBottom: 8, padding: '6px 10px' }}
+          value={localProtocol} onChange={e => setLocalProtocol(e.target.value)}
+          onBlur={() => setEditingProtocol(false)}
+          onKeyDown={e => { if (e.key === 'Enter') setEditingProtocol(false); }}
+          autoFocus aria-label="Edit protocol" />
+      ) : (
+        <div onClick={() => setEditingProtocol(true)} style={{ color: '#E2E8F0', fontSize: 14, marginBottom: 8, cursor: 'pointer', borderBottom: '1px dashed #374151', display: 'inline-block', paddingBottom: 2 }}
+          title="Click to edit">
+          {localProtocol}
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <span style={{ background: `${color}20`, padding: '4px 10px', borderRadius: 8, color, fontSize: 13, fontWeight: 600 }}>
           Target: {zone.low}-{zone.high} bpm
@@ -2432,10 +2567,12 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
           completed={!!todayStrengthDone?.completed || !!strengthLog?.completed}
           note={strengthNote}
           onNoteChange={setStrengthNote}
-          onSaveSets={async (sets) => {
-            for (const ex of STRENGTH_TEMPLATES[activeStrength]) {
-              const exSets = sets.filter(s => s.exerciseName === ex.name);
-              if (exSets.length > 0) await saveStrengthSets(user.uid, selectedDate, ex.name, exSets);
+          onSaveSets={async (sets, localExercises) => {
+            const exNames = new Set((localExercises || []).map(e => e.name));
+            sets.forEach(s => exNames.add(s.exerciseName));
+            for (const name of exNames) {
+              const exSets = sets.filter(s => s.exerciseName === name);
+              if (exSets.length > 0) await saveStrengthSets(user.uid, selectedDate, name, exSets);
             }
             await saveWorkoutLog(user.uid, { logDate: selectedDate, sessionType: activeStrength, completed: true, note: strengthNote });
             onDataChange();
