@@ -2729,10 +2729,20 @@ function FPCalendarView({ profile, workoutLogs, onSelectDate }) {
     </span>
   );
 
+  // Compute date range for header
+  const endDate = new Date(startDate);
+  endDate.setDate(endDate.getDate() + 55);
+  const MONTH_NAMES_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const MONTH_NAMES_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const startMonthYear = `${MONTH_NAMES_FULL[startDate.getMonth()]} ${startDate.getDate()}`;
+  const endMonthYear = `${MONTH_NAMES_FULL[endDate.getMonth()]} ${endDate.getDate()}, ${endDate.getFullYear()}`;
+  const dateRangeLabel = startDate.getFullYear() === endDate.getFullYear() ? `${startMonthYear} – ${endMonthYear}` : `${startMonthYear}, ${startDate.getFullYear()} – ${endMonthYear}`;
+
   return (
     <div style={{ maxWidth: 900, margin: '0 auto' }}>
-      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginBottom: 8 }}>Block {profile.blockNumber} Calendar</h2>
-      <p style={{ color: '#94A3B8', fontSize: 13, marginBottom: 16 }}>Tap any day to log or review. Filled tags = completed. Outlined = planned/suggested.</p>
+      <h2 style={{ fontSize: 20, fontWeight: 700, color: '#E2E8F0', marginBottom: 4 }}>Block {profile.blockNumber} Calendar</h2>
+      <p style={{ color: '#3B82F6', fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{dateRangeLabel}</p>
+      <p style={{ color: '#94A3B8', fontSize: 13, marginBottom: 16 }}>Tap any day to log or review. Filled = completed.</p>
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -2748,13 +2758,23 @@ function FPCalendarView({ profile, workoutLogs, onSelectDate }) {
         const weekDays = days.filter(d => d.week === week);
         const ramp = getCardioRampForBlock(profile.blockNumber);
         const wd = ramp[week - 1];
+        // Detect month boundary in this week
+        const firstDay = weekDays[0]?.date;
+        const lastDay = weekDays[weekDays.length - 1]?.date;
+        const weekDateRange = firstDay && lastDay
+          ? firstDay.getMonth() === lastDay.getMonth()
+            ? `${MONTH_NAMES_SHORT[firstDay.getMonth()]} ${firstDay.getDate()}–${lastDay.getDate()}`
+            : `${MONTH_NAMES_SHORT[firstDay.getMonth()]} ${firstDay.getDate()} – ${MONTH_NAMES_SHORT[lastDay.getMonth()]} ${lastDay.getDate()}`
+          : '';
+
         return (
           <div key={week} style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 6, flexWrap: 'wrap' }}>
               <span style={{ color: '#E2E8F0', fontSize: 13, fontWeight: 700 }}>Week {week}</span>
+              <span style={{ color: '#3B82F6', fontSize: 12, fontWeight: 600 }}>{weekDateRange}</span>
               <span style={{ color: '#94A3B8', fontSize: 11 }}>
-                {wd.walks.target} walks ({wd.walks.duration}) · {wd.intervals.length} interval{wd.intervals.length > 1 ? 's' : ''}
-                {wd.benchmark ? ' · Benchmark week' : ''}
+                {wd.walks.target} walks · {wd.intervals.length} interval{wd.intervals.length > 1 ? 's' : ''}
+                {wd.benchmark ? ' · Benchmark' : ''}
               </span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: isMobile ? 4 : 6 }}>
@@ -2763,6 +2783,9 @@ function FPCalendarView({ profile, workoutLogs, onSelectDate }) {
                 const dayNum = day.date.getDate();
                 const hasLogs = day.logged.length > 0;
                 const missed = day.isPast && !hasLogs;
+                // Show month abbreviation on the 1st of each month, or the first day of the block
+                const showMonth = dayNum === 1 || day.dayIndex === 0;
+                const monthAbbr = MONTH_NAMES_SHORT[day.date.getMonth()];
 
                 return (
                   <button key={day.dayIndex} onClick={() => onSelectDate(day.dateStr)}
@@ -2770,10 +2793,11 @@ function FPCalendarView({ profile, workoutLogs, onSelectDate }) {
                       background: day.isToday ? 'rgba(59,130,246,0.12)' : missed ? 'rgba(239,68,68,0.05)' : '#1A1F35',
                       border: day.isToday ? '2px solid #3B82F6' : '1px solid #252B45',
                       borderRadius: 10, padding: isMobile ? '6px 3px' : '8px 6px', cursor: 'pointer', textAlign: 'center',
-                      minHeight: isMobile ? 72 : 88, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3,
+                      minHeight: isMobile ? 72 : 88, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
                     }}
-                    aria-label={`${dayAbbr} ${dayNum}`}>
+                    aria-label={`${dayAbbr} ${monthAbbr} ${dayNum}`}>
                     <div style={{ color: '#94A3B8', fontSize: 10 }}>{dayAbbr}</div>
+                    {showMonth && <div style={{ color: '#3B82F6', fontSize: 9, fontWeight: 700, lineHeight: 1 }}>{monthAbbr}</div>}
                     <div style={{ color: day.isToday ? '#3B82F6' : '#E2E8F0', fontSize: isMobile ? 14 : 16, fontWeight: 700 }}>{dayNum}</div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, alignItems: 'center' }}>
                       {day.logged.map((type, i) => <Tag key={i} type={type} done={true} />)}
