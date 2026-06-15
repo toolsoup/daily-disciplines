@@ -2466,25 +2466,20 @@ function FPTodayView({ profile, workoutLogs, strengthSets, checkins, testResults
   // Build exercise list: if we have logged sets for this date, reconstruct from actual data; otherwise use template
   const exercisesForCard = useMemo(() => {
     if (daySets.length > 0 && activeStrength) {
-      // Reconstruct exercises from what was actually saved
+      // Completed session exists — show ONLY what was actually saved, not the template
       const exMap = {};
       daySets.forEach(s => {
         if (!exMap[s.exerciseName]) exMap[s.exerciseName] = { name: s.exerciseName, sets: 0, repsRange: '' };
         exMap[s.exerciseName].sets = Math.max(exMap[s.exerciseName].sets, s.setIndex + 1);
       });
-      const fromData = Object.values(exMap);
-      // If template exists, merge: keep template order/repsRange but add any custom exercises
-      if (STRENGTH_TEMPLATES[activeStrength]) {
-        const templateNames = new Set(STRENGTH_TEMPLATES[activeStrength].map(e => e.name));
-        const fromTemplate = STRENGTH_TEMPLATES[activeStrength].map(e => {
-          const saved = exMap[e.name];
-          return saved ? { ...e, sets: Math.max(e.sets, saved.sets) } : e;
-        });
-        // Add any custom exercises not in template
-        const custom = fromData.filter(e => !templateNames.has(e.name));
-        return [...fromTemplate, ...custom];
-      }
-      return fromData;
+      // Preserve order: if a template exercise is in the saved data, use template's repsRange hint
+      const template = STRENGTH_TEMPLATES[activeStrength] || [];
+      const templateMap = {};
+      template.forEach(e => { templateMap[e.name] = e; });
+      return Object.values(exMap).map(e => ({
+        ...e,
+        repsRange: templateMap[e.name]?.repsRange || e.repsRange,
+      }));
     }
     return activeStrength && STRENGTH_TEMPLATES[activeStrength] ? STRENGTH_TEMPLATES[activeStrength] : [];
   }, [daySets, activeStrength]);
